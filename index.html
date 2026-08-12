@@ -45,8 +45,10 @@ button{font-family:inherit;cursor:pointer;}
 
 /* ---------- BOARD ---------- */
 #game-root{display:none;position:relative;min-height:100vh;min-height:100dvh;background:
-  radial-gradient(ellipse at 50% 50%,#0e3a22,#04140a 85%);}
-#board-wrap{position:relative;display:flex;}
+  radial-gradient(ellipse at 50% 50%,#0e3a22,#04140a 85%);
+  flex-direction:column;align-items:stretch;
+  justify-content:center;justify-content:safe center;}
+#board-wrap{position:relative;display:flex;margin:auto 0;}
 #board{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;
   padding:4px 6px;gap:clamp(2px,.8vw,8px);min-width:0;}
 
@@ -682,7 +684,7 @@ function startCoinFlip2(){
 
 function beginDuel(){
   document.getElementById('start-screen').style.display='none';
-  document.getElementById('game-root').style.display='block';
+  document.getElementById('game-root').style.display='flex';
   G.health=[G.startHealth,G.startHealth];
   G.deck=buildDeck();
   G.gy=[];
