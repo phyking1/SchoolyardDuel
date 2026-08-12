@@ -42,6 +42,8 @@ button{font-family:inherit;cursor:pointer;}
   box-shadow:0 6px 18px rgba(0,0,0,.5);}
 .die1.spin{animation:diespin .9s ease-out;}
 @keyframes diespin{0%{transform:rotate(0)}70%{transform:rotate(720deg)}100%{transform:rotate(1080deg)}}
+#version-tag{position:absolute;left:0;right:0;bottom:8px;text-align:center;
+  font-size:.68em;color:var(--dim);opacity:.6;pointer-events:none;}
 
 /* ---------- BOARD ---------- */
 #game-root{display:none;position:relative;min-height:100vh;min-height:100dvh;background:
@@ -354,6 +356,7 @@ button{font-family:inherit;cursor:pointer;}
     </div>
     <div id="coin-result" style="min-height:28px;font-weight:700;color:var(--gold)"></div>
   </div>
+  <div id="version-tag"></div>
 </div>
 
 <div id="game-root">
@@ -425,6 +428,8 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
+const GAME_VERSION='v13';
+document.getElementById('version-tag').textContent=GAME_VERSION;
 /* ============================= CARD DATABASE ============================= */
 const ATTRS=['LIGHT','DARK','EARTH','WATER','FIRE','WIND'];
 function slug(n){return n.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');}
