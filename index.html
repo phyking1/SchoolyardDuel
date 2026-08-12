@@ -44,9 +44,9 @@ button{font-family:inherit;cursor:pointer;}
 @keyframes diespin{0%{transform:rotate(0)}70%{transform:rotate(720deg)}100%{transform:rotate(1080deg)}}
 
 /* ---------- BOARD ---------- */
-#game-root{display:none;position:relative;min-height:100vh;background:
+#game-root{display:none;position:relative;min-height:100vh;min-height:100dvh;background:
   radial-gradient(ellipse at 50% 50%,#0e3a22,#04140a 85%);}
-#board-wrap{position:relative;display:flex;min-height:100vh;}
+#board-wrap{position:relative;display:flex;}
 #board{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;
   padding:4px 6px;gap:clamp(2px,.8vw,8px);min-width:0;}
 
@@ -232,12 +232,6 @@ button{font-family:inherit;cursor:pointer;}
   justify-content:center;z-index:95;flex-direction:column;gap:16px;}
 #gameover-bg h1{font-size:2.4em;color:var(--gold);margin:0;}
 
-/* ---------- mute button ---------- */
-#mute-btn{position:fixed;top:10px;right:10px;z-index:40;width:38px;height:38px;border-radius:50%;
-  background:#16281c;border:1px solid var(--gold-dim);color:var(--ink);font-size:1.1em;
-  display:flex;align-items:center;justify-content:center;}
-#mute-btn:hover{border-color:var(--gold);}
-
 /* ---------- turn banner ---------- */
 #turn-flash-wrap{position:fixed;top:42%;left:0;right:0;display:flex;justify-content:center;
   pointer-events:none;z-index:60;}
@@ -336,7 +330,6 @@ button{font-family:inherit;cursor:pointer;}
 </head>
 <body>
 
-<button id="mute-btn" title="Toggle sound">🔊</button>
 <div id="turn-flash-wrap"><div id="turn-flash-text"></div></div>
 
 <div id="start-screen">
@@ -549,47 +542,12 @@ const ME=0, BOT=1;
 const justPlacedSet=new Set();
 
 /* ============================= SFX (synthesized, no asset files) ============================= */
-const SFX=(()=>{
-  let ctx=null, muted=false;
-  function ensure(){
-    if(!ctx){ try{ ctx=new (window.AudioContext||window.webkitAudioContext)(); }catch(e){} }
-    if(ctx && ctx.state==='suspended') ctx.resume();
-  }
-  function tone(freq,dur,type,vol,delay){
-    if(muted||!ctx) return;
-    const t0=ctx.currentTime+(delay||0);
-    const osc=ctx.createOscillator(), gain=ctx.createGain();
-    osc.type=type||'sine'; osc.frequency.setValueAtTime(freq,t0);
-    gain.gain.setValueAtTime(0,t0);
-    gain.gain.linearRampToValueAtTime(vol||0.15,t0+0.02);
-    gain.gain.exponentialRampToValueAtTime(0.001,t0+dur);
-    osc.connect(gain); gain.connect(ctx.destination);
-    osc.start(t0); osc.stop(t0+dur+0.03);
-  }
-  return {
-    ensure,
-    toggleMute(){ muted=!muted; return muted; },
-    isMuted(){ return muted; },
-    draw(){ tone(520,.12,'triangle',.12); },
-    place(){ tone(300,.1,'square',.1); tone(440,.12,'square',.08,.05); },
-    activate(){ tone(660,.15,'sawtooth',.1); tone(880,.18,'sawtooth',.08,.06); },
-    diceRoll(){ for(let i=0;i<5;i++) tone(200+Math.random()*300,.05,'square',.05,i*0.07); },
-    diceLand(){ tone(700,.15,'triangle',.16); },
-    swing(){ tone(150,.08,'sawtooth',.12); },
-    hit(){ tone(90,.18,'square',.2); },
-    destroy(){ tone(120,.25,'sawtooth',.15); tone(60,.3,'square',.15,.05); },
-    heal(){ tone(500,.1,'sine',.1); tone(700,.14,'sine',.1,.08); },
-    phase(){ tone(880,.06,'sine',.06); },
-    turn(){ tone(440,.12,'sine',.1); tone(660,.16,'sine',.1,.1); },
-    victory(){ [523,659,784,1047].forEach((f,i)=>tone(f,.3,'triangle',.15,i*0.14)); },
-    defeat(){ [400,340,280,220].forEach((f,i)=>tone(f,.35,'sawtooth',.15,i*0.16)); },
-    click(){ tone(600,.04,'square',.06); },
-  };
-})();
-document.getElementById('mute-btn').addEventListener('click',()=>{
-  const m=SFX.toggleMute();
-  document.getElementById('mute-btn').textContent = m? '🔇' : '🔊';
-});
+/* Sound is disabled; SFX is a no-op stub so existing call sites stay harmless. */
+const SFX={
+  ensure(){}, toggleMute(){return true;}, isMuted(){return true;},
+  draw(){}, place(){}, activate(){}, diceRoll(){}, diceLand(){}, swing(){}, hit(){},
+  destroy(){}, heal(){}, phase(){}, turn(){}, victory(){}, defeat(){}, click(){},
+};
 document.getElementById('detail-handle').addEventListener('click',()=>{
   document.getElementById('detail-panel').classList.toggle('expanded');
 });
@@ -1163,7 +1121,20 @@ function render(){
     const ar=document.createElement('div'); ar.className='draw-arrow'; ar.textContent='▼';
     deckPile.appendChild(ar);
   }
+  syncRailHeights();
 }
+function syncRailHeights(){
+  // Some mobile browsers mis-stretch a flex sibling with an auto-height nested
+  // flex:1 descendant, so pin the rails to #board's real rendered height explicitly
+  // instead of relying on align-items:stretch.
+  const board=document.getElementById('board');
+  const h=board.getBoundingClientRect().height;
+  if(h<=0) return;
+  const px=h+'px';
+  document.getElementById('hp-rail-opp').style.height=px;
+  document.getElementById('hp-rail-me').style.height=px;
+}
+window.addEventListener('resize',()=>{ if(document.getElementById('game-root').style.display!=='none') syncRailHeights(); });
 function renderLog(){
   const el=document.getElementById('log-panel');
   el.innerHTML='';
