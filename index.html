@@ -191,7 +191,7 @@ button{font-family:inherit;cursor:pointer;}
 #log-panel .lg.sys{color:var(--gold-dim);}
 
 /* ---------- card zoom popup (real-card-style detail view) ---------- */
-#card-popup{position:fixed;top:56px;right:10px;z-index:66;display:none;}
+#card-popup{position:fixed;top:56px;right:10px;z-index:85;display:none;}
 #card-popup.show{display:block;}
 #card-popup-close{position:absolute;top:-9px;right:-9px;width:24px;height:24px;border-radius:50%;
   background:#16281c;border:1px solid var(--gold);color:var(--ink);font-size:.75em;
@@ -231,6 +231,20 @@ button{font-family:inherit;cursor:pointer;}
 #toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#16281c;
   border:1px solid var(--gold);color:var(--ink);padding:8px 18px;border-radius:20px;z-index:90;
   font-size:.9em;display:none;box-shadow:0 4px 14px rgba(0,0,0,.5);}
+
+/* card browser: deck list / graveyard */
+#decklist-btn{position:fixed;top:10px;right:10px;z-index:51;width:38px;height:38px;border-radius:50%;
+  background:#16281c;border:1px solid var(--gold-dim);color:var(--ink);font-size:1.1em;
+  display:flex;align-items:center;justify-content:center;}
+#decklist-btn:hover{border-color:var(--gold);}
+.card-list-rows{max-height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:4px;margin:10px 0;}
+.card-list-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;
+  background:#16281c;border:1px solid var(--gold-dim);cursor:pointer;text-align:left;}
+.card-list-row:hover{border-color:var(--gold);background:#1e3524;}
+.clr-icon{font-size:1.2em;flex:0 0 auto;}
+.clr-name{flex:1;font-weight:600;}
+.clr-tag{flex:0 0 auto;font-size:.78em;color:var(--dim);white-space:nowrap;}
+.carousel-card-wrap{display:flex;justify-content:center;margin:10px 0;}
 
 #gameover-bg{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;
   justify-content:center;z-index:95;flex-direction:column;gap:16px;}
@@ -334,6 +348,7 @@ button{font-family:inherit;cursor:pointer;}
 </head>
 <body>
 
+<button id="decklist-btn" title="View Deck List">📜</button>
 <div id="turn-flash-wrap"><div id="turn-flash-text"></div></div>
 
 <div id="start-screen">
@@ -428,7 +443,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v13';
+const GAME_VERSION='v14';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 /* ============================= CARD DATABASE ============================= */
 const ATTRS=['LIGHT','DARK','EARTH','WATER','FIRE','WIND'];
@@ -1180,8 +1195,7 @@ document.getElementById('pile-gy').addEventListener('click',()=>{
   showGYModal();
 });
 function showGYModal(){
-  const html=G.gy.length? G.gy.map(c=>base(c).n).join(', ') : '(empty)';
-  showModal('Graveyard ('+G.gy.length+')', html, [{label:'Close',action:()=>{}}]);
+  openCardBrowser('Graveyard ('+G.gy.length+')', defsFromInstances(G.gy));
 }
 
 function onHandCardClick(card){
@@ -1837,6 +1851,100 @@ function toast(msg){
   const t=document.getElementById('toast'); t.textContent=msg; t.style.display='block';
   clearTimeout(toastTimer); toastTimer=setTimeout(()=>t.style.display='none',2200);
 }
+
+/* ============================= CARD BROWSER (deck list / graveyard) ============================= */
+function allCardDefs(){ return [...MONSTER_DB,...SPELLTRAP_DB]; }
+function defsFromInstances(cards){ return cards.map(c=>base(c)); }
+function previewInstance(def){ return {baseId:def.id, zone:-1}; }
+function sortedByName(defs){ return defs.slice().sort((a,b)=>a.n.localeCompare(b.n)); }
+
+function closeOnBgClick(bg){
+  bg.addEventListener('click',(e)=>{ if(e.target===bg) document.body.removeChild(bg); });
+}
+
+function openCardBrowser(title,defs){
+  const monsters=sortedByName(defs.filter(d=>d.cat==='Monster'));
+  const spelltraps=sortedByName(defs.filter(d=>d.cat!=='Monster'));
+  const opts=[];
+  if(monsters.length) opts.push({label:`See All Monsters (${monsters.length})`,action:()=>showCardTextList(title+' · Monsters',monsters)});
+  if(spelltraps.length) opts.push({label:`See All Spells/Traps (${spelltraps.length})`,action:()=>showCardTextList(title+' · Spells/Traps',spelltraps)});
+  if(defs.length) opts.push({label:'View Cards',action:()=>openCardCarousel(title,sortedByName(defs))});
+  opts.push({label:'Close',action:()=>{}});
+  showModal(title, defs.length?`${defs.length} card${defs.length===1?'':'s'}.`:'Empty.', opts);
+}
+
+function showCardTextList(title,defs){
+  const bg=document.createElement('div'); bg.className='modal-bg';
+  const m=document.createElement('div'); m.className='modal';
+  m.innerHTML=`<h3>${title}</h3><p class="hint">${defs.length} card${defs.length===1?'':'s'}. Tap a card to view it.</p>`;
+  const list=document.createElement('div'); list.className='card-list-rows';
+  defs.forEach(d=>{
+    const row=document.createElement('div'); row.className='card-list-row';
+    const icon=document.createElement('span'); icon.className='clr-icon'; icon.textContent=d.em;
+    const name=document.createElement('span'); name.className='clr-name'; name.textContent=d.n;
+    const tag=document.createElement('span'); tag.className='clr-tag';
+    tag.textContent = d.cat==='Monster' ? `Lv${d.l} ${d.atk}/${d.def}` : `${d.sub} ${d.cat}`;
+    row.append(icon,name,tag);
+    row.addEventListener('click',(e)=>{ e.stopPropagation(); showCardPopup(previewInstance(d),false); });
+    list.appendChild(row);
+  });
+  m.appendChild(list);
+  const closeRow=document.createElement('div'); closeRow.className='mrow';
+  const closeBtn=document.createElement('div'); closeBtn.className='mopt';
+  closeBtn.innerHTML='<span class="mopt-label">Close</span>';
+  closeBtn.addEventListener('click',()=>document.body.removeChild(bg));
+  closeRow.appendChild(closeBtn);
+  m.appendChild(closeRow);
+  bg.appendChild(m); document.body.appendChild(bg);
+  closeOnBgClick(bg);
+}
+
+function openCardCarousel(title,defs){
+  if(!defs.length) return;
+  let idx=0;
+  const bg=document.createElement('div'); bg.className='modal-bg';
+  const m=document.createElement('div'); m.className='modal carousel-modal';
+  const head=document.createElement('h3'); head.textContent=title;
+  const counter=document.createElement('p'); counter.className='hint';
+  const cardWrap=document.createElement('div'); cardWrap.className='carousel-card-wrap';
+  const navRow=document.createElement('div'); navRow.className='mrow';
+  const prevBtn=document.createElement('div'); prevBtn.className='mopt';
+  prevBtn.innerHTML='<span class="mopt-label">◀ Prev</span>';
+  const nextBtn=document.createElement('div'); nextBtn.className='mopt';
+  nextBtn.innerHTML='<span class="mopt-label">Next ▶</span>';
+  const closeRow=document.createElement('div'); closeRow.className='mrow';
+  const closeBtn=document.createElement('div'); closeBtn.className='mopt';
+  closeBtn.innerHTML='<span class="mopt-label">Close</span>';
+  function renderCurrent(){
+    const d=defs[idx];
+    counter.textContent=`${idx+1} / ${defs.length} — ${d.cat}`;
+    cardWrap.innerHTML='';
+    cardWrap.appendChild(buildZoomCard(previewInstance(d),false));
+  }
+  function close(){
+    document.removeEventListener('keydown',onKey);
+    if(bg.parentNode) document.body.removeChild(bg);
+  }
+  function onKey(e){
+    if(e.key==='ArrowLeft'){ idx=(idx-1+defs.length)%defs.length; renderCurrent(); }
+    else if(e.key==='ArrowRight'){ idx=(idx+1)%defs.length; renderCurrent(); }
+    else if(e.key==='Escape'){ close(); }
+  }
+  prevBtn.addEventListener('click',()=>{ idx=(idx-1+defs.length)%defs.length; renderCurrent(); });
+  nextBtn.addEventListener('click',()=>{ idx=(idx+1)%defs.length; renderCurrent(); });
+  closeBtn.addEventListener('click',close);
+  navRow.append(prevBtn,nextBtn);
+  closeRow.appendChild(closeBtn);
+  m.append(head,counter,cardWrap,navRow,closeRow);
+  bg.appendChild(m); document.body.appendChild(bg);
+  bg.addEventListener('click',(e)=>{ if(e.target===bg) close(); });
+  document.addEventListener('keydown',onKey);
+  renderCurrent();
+}
+
+document.getElementById('decklist-btn').addEventListener('click',()=>{
+  openCardBrowser('Deck List ('+allCardDefs().length+')', allCardDefs());
+});
 
 /* ============================= BOT AI ============================= */
 function botMainPhase(){
