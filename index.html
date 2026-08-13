@@ -528,7 +528,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v38';
+const GAME_VERSION='v39';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -869,7 +869,7 @@ function buildTableView(){
   const sceneBottom1=document.getElementById('table-scene-bottom-1');
   [sceneTop0,sceneTop1,sceneBottom0,sceneBottom1].forEach(el=>el.innerHTML='');
 
-  const buildPanel=(name,idSuffix,seat,isMine)=>{
+  const buildPanel=(name,idSuffix,seat,sameOrientation)=>{
     const panel=document.createElement('div');
     panel.className='opp-panel table-slot'; if(seat!=null) panel.dataset.seat=seat; panel.id='table-panel-'+idSuffix;
     const header=
@@ -879,13 +879,15 @@ function buildTableView(){
         `<div class="opp-hp-num" id="hn-${idSuffix}">${G.startHealth}</div>`+
         `<div class="opp-hand-count" id="handcount-${idSuffix}">H:0</div>`+
       `</div>`;
-    const hand=`<div class="hand-row${isMine?'':' opp'}" id="hand-${idSuffix}"></div>`;
+    const hand=`<div class="hand-row${sameOrientation?'':' opp'}" id="hand-${idSuffix}"></div>`;
     const st=`<div class="zone-row" id="st-${idSuffix}"></div>`;
     const mon=`<div class="zone-row" id="mon-${idSuffix}"></div>`;
-    // Your own panel reads top-to-bottom as monsters/spells (nearest the center of the table) then
-    // your hand (nearest you, at the bottom) -- matching the normal board. Opponent panels read the
-    // opposite way: their hand near the far edge, their monsters nearest the center.
-    panel.innerHTML = header + (isMine ? mon+st+hand : hand+st+mon);
+    // Seats that share your orientation (you, and your neighbor sitting beside you facing the same
+    // way) read top-to-bottom as monsters/spells (nearest the center of the table) then hand
+    // (nearest the real edge of the screen) -- matching the normal board. Seats that face you across
+    // the table read the opposite way: their hand near the far edge, their monsters nearest the
+    // center, since visually they're turned to look back at you.
+    panel.innerHTML = header + (sameOrientation ? mon+st+hand : hand+st+mon);
     return panel;
   };
 
@@ -899,7 +901,7 @@ function buildTableView(){
   sceneBottom0.appendChild(buildPanel('You','tme',null,true));
   const hasNeighbor = G.numPlayers>=3;
   const neighborSeat = G.numPlayers-1;
-  if(hasNeighbor) sceneBottom1.appendChild(buildPanel(pName(neighborSeat),'t'+neighborSeat,neighborSeat,false));
+  if(hasNeighbor) sceneBottom1.appendChild(buildPanel(pName(neighborSeat),'t'+neighborSeat,neighborSeat,true));
 
   // Top row, left to right: whoever's turn comes right after yours (across from you), then
   // whoever's next after that (across from your neighbor, 4P only) -- kept in the same
