@@ -115,28 +115,32 @@ button{font-family:inherit;cursor:pointer;}
 .opp-hand-count{font-size:clamp(.5em,1.5vw,.62em);color:var(--dim);background:#10241a;
   border:1px solid #234;padding:0 4px;border-radius:4px;white-space:nowrap;flex:0 0 auto;}
 
-/* Table View: a spatial seating layout instead of the stacked list -- two opponents face you at
-   the top, and (in a 4-player game) the seat to your right sits on a second page you pan to. */
+/* Table View: pan between two complete, normal-looking 1v1 screens -- page 0 is you vs. the
+   opponent seated across from you, page 1 is your right-hand neighbor vs. the opponent seated
+   across from THEM. The whole screen swaps per page (own board included), not just the top strip,
+   so the top strip and bottom strip scroll in lockstep. */
 #view-toggle-row{display:flex;justify-content:center;padding:2px 0;}
 #view-toggle-btn{background:var(--panel2);border:1px solid var(--gold-dim);color:var(--gold);
   border-radius:8px;padding:3px 10px;font-size:.68em;font-weight:700;cursor:pointer;}
 #view-toggle-btn:hover{border-color:var(--gold);}
-#table-view{display:none;position:relative;height:clamp(160px,30vh,230px);}
-#board.table-mode #table-view{display:block;}
-#board.table-mode #opp-stack{display:none;}
-#table-scroll{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;height:100%;
-  -webkit-overflow-scrolling:touch;scrollbar-width:none;}
-#table-scroll::-webkit-scrollbar{display:none;}
-.table-page{min-width:100%;flex-shrink:0;scroll-snap-align:start;box-sizing:border-box;
-  display:flex;align-items:center;justify-content:center;height:100%;gap:10px;padding:0 8px;}
-#table-page-top{gap:10px;}
-#table-page-top .opp-panel{flex:1 1 0;max-width:47%;}
-.opp-panel.rotated-right{flex:0 0 auto;width:220px;height:112px;transform:rotate(90deg);}
-#table-page-right:not(.has-right){display:none;}
-#table-pan-controls{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;
-  justify-content:center;gap:10px;pointer-events:none;padding-bottom:2px;}
-#table-pan-controls.single-page{display:none;}
-#table-pan-controls button{pointer-events:auto;background:rgba(20,20,20,.65);border:1px solid var(--gold-dim);
+#table-view-top,#table-view-bottom,#table-pan-controls{display:none;}
+#board.table-mode #table-view-top,#board.table-mode #table-view-bottom{display:block;}
+#board.table-mode #table-pan-controls{display:flex;}
+#board.table-mode #opp-stack,#board.table-mode #mon-me,#board.table-mode #st-me,
+#board.table-mode #hand-me{display:none;}
+#board-wrap.table-mode #hp-rail-me{display:none;}
+#table-view-top{height:clamp(150px,28vh,215px);}
+#table-view-bottom{height:clamp(150px,28vh,215px);}
+#table-scroll-top,#table-scroll-bottom{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;
+  height:100%;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+#table-scroll-top::-webkit-scrollbar,#table-scroll-bottom::-webkit-scrollbar{display:none;}
+.table-scene{min-width:100%;flex-shrink:0;scroll-snap-align:start;box-sizing:border-box;
+  display:flex;align-items:stretch;justify-content:center;height:100%;padding:0 8px;}
+.table-scene .opp-panel{width:100%;max-width:340px;}
+.table-scene:empty{visibility:hidden;}
+#table-pan-controls{align-items:center;justify-content:center;gap:10px;padding:2px 0;}
+#board.table-mode #table-pan-controls.single-page{display:none;}
+#table-pan-controls button{background:rgba(20,20,20,.65);border:1px solid var(--gold-dim);
   color:var(--gold);border-radius:50%;width:24px;height:24px;font-size:.72em;line-height:1;cursor:pointer;}
 #table-pan-dots{display:flex;gap:5px;}
 .pan-dot{width:6px;height:6px;border-radius:50%;background:#444;display:inline-block;}
@@ -461,15 +465,10 @@ button{font-family:inherit;cursor:pointer;}
         <button id="view-toggle-btn" type="button">🗺️ Table View</button>
       </div>
       <div id="opp-stack"></div>
-      <div id="table-view">
-        <div id="table-scroll">
-          <div class="table-page" id="table-page-top"></div>
-          <div class="table-page" id="table-page-right"></div>
-        </div>
-        <div id="table-pan-controls">
-          <button id="table-pan-left" type="button">◀</button>
-          <div id="table-pan-dots"><span class="pan-dot active" data-page="0"></span><span class="pan-dot" data-page="1"></span></div>
-          <button id="table-pan-right" type="button">▶</button>
+      <div id="table-view-top">
+        <div id="table-scroll-top">
+          <div class="table-scene" id="table-scene-top-0"></div>
+          <div class="table-scene" id="table-scene-top-1"></div>
         </div>
       </div>
       <div class="center-row">
@@ -488,6 +487,17 @@ button{font-family:inherit;cursor:pointer;}
           <div class="pile-label" id="gy-count">0</div>
           <div>GY</div>
         </div>
+      </div>
+      <div id="table-view-bottom">
+        <div id="table-scroll-bottom">
+          <div class="table-scene" id="table-scene-bottom-0"></div>
+          <div class="table-scene" id="table-scene-bottom-1"></div>
+        </div>
+      </div>
+      <div id="table-pan-controls">
+        <button id="table-pan-left" type="button">◀</button>
+        <div id="table-pan-dots"><span class="pan-dot active" data-page="0"></span><span class="pan-dot" data-page="1"></span></div>
+        <button id="table-pan-right" type="button">▶</button>
       </div>
 
       <div class="zone-row" id="mon-me"></div>
@@ -528,7 +538,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v33';
+const GAME_VERSION='v34';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -859,44 +869,61 @@ function buildOpponentPanels(){
     stack.appendChild(panel);
   }
 }
-// Builds the spatial "table" layout: seats 1 and 2 face you across the top (both visible without
-// panning); seat 3, if there is one, sits to your right on a second page you pan to, rotated 90°
-// to read as if you turned to look beside you.
+// Builds the "table" layout as two complete 1v1 scenes you pan between: page 0 is you (bottom) vs.
+// the opponent seated across from you (top); page 1 is your right-hand neighbor (bottom) vs. the
+// opponent seated across from THEM (top, only exists with a 4th seat). The top and bottom strips
+// scroll in lockstep so panning always swaps the whole screen, not just one half of it.
 function buildTableView(){
-  const topPage=document.getElementById('table-page-top');
-  const rightPage=document.getElementById('table-page-right');
-  topPage.innerHTML=''; rightPage.innerHTML='';
-  const compact = G.numPlayers>3 ? ' compact' : '';
-  const buildPanel=(s,rotated)=>{
+  const sceneTop0=document.getElementById('table-scene-top-0');
+  const sceneTop1=document.getElementById('table-scene-top-1');
+  const sceneBottom0=document.getElementById('table-scene-bottom-0');
+  const sceneBottom1=document.getElementById('table-scene-bottom-1');
+  [sceneTop0,sceneTop1,sceneBottom0,sceneBottom1].forEach(el=>el.innerHTML='');
+
+  const buildPanel=(name,idSuffix,seat,isMine)=>{
     const panel=document.createElement('div');
-    panel.className='opp-panel table-slot'+(rotated?' rotated-right':''); panel.dataset.seat=s; panel.id='table-panel-'+s;
+    panel.className='opp-panel table-slot'; if(seat!=null) panel.dataset.seat=seat; panel.id='table-panel-'+idSuffix;
     panel.innerHTML=
       `<div class="opp-panel-header">`+
-        `<div class="opp-panel-name">${pName(s)}</div>`+
-        `<div class="opp-hp-bar-wrap"><div class="opp-hp-bar" id="hb-t${s}"></div></div>`+
-        `<div class="opp-hp-num" id="hn-t${s}">${G.startHealth}</div>`+
-        `<div class="opp-hand-count" id="handcount-t${s}">H:0</div>`+
+        `<div class="opp-panel-name">${name}</div>`+
+        `<div class="opp-hp-bar-wrap"><div class="opp-hp-bar" id="hb-${idSuffix}"></div></div>`+
+        `<div class="opp-hp-num" id="hn-${idSuffix}">${G.startHealth}</div>`+
+        `<div class="opp-hand-count" id="handcount-${idSuffix}">H:0</div>`+
       `</div>`+
-      `<div class="hand-row opp${compact}" id="hand-t${s}"></div>`+
-      `<div class="zone-row${compact}" id="st-t${s}"></div>`+
-      `<div class="zone-row${compact}" id="mon-t${s}"></div>`;
+      `<div class="hand-row${isMine?'':' opp'}" id="hand-${idSuffix}"></div>`+
+      `<div class="zone-row" id="st-${idSuffix}"></div>`+
+      `<div class="zone-row" id="mon-${idSuffix}"></div>`;
     return panel;
   };
-  for(let s=1;s<G.numPlayers && s<=2;s++) topPage.appendChild(buildPanel(s,false));
-  const hasRight = G.numPlayers>3;
-  rightPage.classList.toggle('has-right',hasRight);
-  if(hasRight) rightPage.appendChild(buildPanel(3,true));
-  document.getElementById('table-pan-controls').classList.toggle('single-page',!hasRight);
-  const scroll=document.getElementById('table-scroll'); if(scroll) scroll.scrollLeft=0;
+
+  // Page 0: you vs. whoever is seated across from you.
+  sceneBottom0.appendChild(buildPanel('You','tme',null,true));
+  if(G.numPlayers>=2){
+    const acrossYou = G.numPlayers>=3 ? 2 : 1; // with a single opponent, they ARE the one across from you
+    sceneTop0.appendChild(buildPanel(pName(acrossYou),'t'+acrossYou,acrossYou,false));
+  }
+
+  // Page 1: your right-hand neighbor (seat 1) vs. whoever is seated across from them (seat 3, 4P only).
+  const hasNeighbor = G.numPlayers>=3;
+  if(hasNeighbor){
+    sceneBottom1.appendChild(buildPanel(pName(1),'t1',1,false));
+    if(G.numPlayers>=4) sceneTop1.appendChild(buildPanel(pName(3),'t3',3,false));
+  }
+
+  document.getElementById('table-pan-controls').classList.toggle('single-page',!hasNeighbor);
+  const st=document.getElementById('table-scroll-top'), sb=document.getElementById('table-scroll-bottom');
+  if(st) st.scrollLeft=0; if(sb) sb.scrollLeft=0;
   G.tablePage=0;
   document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===0));
 }
 function switchViewMode(mode){
   G.viewMode=mode;
   document.getElementById('board').classList.toggle('table-mode', mode==='table');
+  document.getElementById('board-wrap').classList.toggle('table-mode', mode==='table');
   document.getElementById('view-toggle-btn').textContent = mode==='table' ? '📋 List View' : '🗺️ Table View';
   if(mode==='table'){
-    const scroll=document.getElementById('table-scroll'); if(scroll) scroll.scrollLeft=0;
+    const st=document.getElementById('table-scroll-top'), sb=document.getElementById('table-scroll-bottom');
+    if(st) st.scrollLeft=0; if(sb) sb.scrollLeft=0;
     G.tablePage=0;
     document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===0));
   }
@@ -1420,6 +1447,18 @@ function render(){
   renderHandRow('hand-me',ME);
   document.getElementById('hand-me').classList.toggle('active-turn',G.active===ME);
 
+  // Table View's own "You" panel (bottom of page 0) mirrors the same data into its own -tme ids.
+  const hbTme=document.getElementById('hb-tme'); if(hbTme) hbTme.style.width=(100*Math.max(0,G.health[ME])/G.startHealth)+'%';
+  const hnTme=document.getElementById('hn-tme'); if(hnTme) hnTme.textContent=G.health[ME];
+  const hcTme=document.getElementById('handcount-tme'); if(hcTme) hcTme.textContent='H:'+G.players[ME].hand.length;
+  if(document.getElementById('mon-tme')){
+    renderZoneRow('mon-tme',ME,'mon'); renderZoneRow('st-tme',ME,'st');
+    renderHandRow('hand-tme',ME);
+  }
+  const handTme=document.getElementById('hand-tme'); if(handTme) handTme.classList.toggle('active-turn',G.active===ME);
+  const panelTme=document.getElementById('table-panel-tme');
+  if(panelTme) panelTme.classList.toggle('active-turn',G.active===ME);
+
   for(let s=1;s<G.numPlayers;s++){
     const hb=document.getElementById('hb-'+s); if(hb) hb.style.width=(100*Math.max(0,G.health[s])/G.startHealth)+'%';
     const hn=document.getElementById('hn-'+s); if(hn) hn.textContent=G.health[s];
@@ -1443,7 +1482,7 @@ function render(){
       renderHandRow('hand-t'+s,s);
     }
     const handElT=document.getElementById('hand-t'+s); if(handElT) handElT.classList.toggle('active-turn',G.active===s);
-    const panelT=document.getElementById('table-panel-'+s);
+    const panelT=document.getElementById('table-panel-t'+s);
     if(panelT){
       panelT.classList.toggle('active-turn',G.active===s);
       panelT.classList.toggle('eliminated',!!G.players[s].eliminated);
@@ -2671,18 +2710,28 @@ document.getElementById('decklist-btn').addEventListener('click',()=>{
 document.getElementById('view-toggle-btn').addEventListener('click',()=>{
   switchViewMode(G.viewMode==='table' ? 'list' : 'table');
 });
-document.getElementById('table-pan-left').addEventListener('click',()=>{
-  const el=document.getElementById('table-scroll'); el.scrollBy({left:-el.clientWidth,behavior:'smooth'});
-});
-document.getElementById('table-pan-right').addEventListener('click',()=>{
-  const el=document.getElementById('table-scroll'); el.scrollBy({left:el.clientWidth,behavior:'smooth'});
-});
-document.getElementById('table-scroll').addEventListener('scroll',()=>{
-  const el=document.getElementById('table-scroll');
-  const page=Math.round(el.scrollLeft/Math.max(1,el.clientWidth));
+function tableGoToPage(page){
+  const st=document.getElementById('table-scroll-top'), sb=document.getElementById('table-scroll-bottom');
+  if(st) st.scrollLeft=page*st.clientWidth;
+  if(sb) sb.scrollLeft=page*sb.clientWidth;
   G.tablePage=page;
   document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===page));
-});
+}
+document.getElementById('table-pan-left').addEventListener('click',()=>tableGoToPage(0));
+document.getElementById('table-pan-right').addEventListener('click',()=>tableGoToPage(1));
+// The top strip (opponent facing whichever bottom seat is in view) and bottom strip (you or your
+// neighbor) must pan together -- whichever one the user actually swipes drives the other to match.
+function syncTableScroll(sourceId,targetId){
+  const source=document.getElementById(sourceId), target=document.getElementById(targetId);
+  if(!source||!target) return;
+  const page=Math.round(source.scrollLeft/Math.max(1,source.clientWidth));
+  G.tablePage=page;
+  document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===page));
+  const targetPos=page*target.clientWidth;
+  if(Math.abs(target.scrollLeft-targetPos)>4) target.scrollLeft=targetPos;
+}
+document.getElementById('table-scroll-top').addEventListener('scroll',()=>syncTableScroll('table-scroll-top','table-scroll-bottom'));
+document.getElementById('table-scroll-bottom').addEventListener('scroll',()=>syncTableScroll('table-scroll-bottom','table-scroll-top'));
 
 /* ============================= BOT AI ============================= */
 function botMainPhase(){
