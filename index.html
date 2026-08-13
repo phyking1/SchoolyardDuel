@@ -70,7 +70,7 @@ button{font-family:inherit;cursor:pointer;}
   border:1px solid #234;padding:1px 4px;border-radius:4px;white-space:nowrap;}
 
 .zone-row{display:flex;justify-content:center;gap:clamp(4px,1.6vw,8px);flex:0 0 auto;padding:2px 0;}
-.zone{width:clamp(38px,13vw,64px);height:clamp(53px,18.2vw,88px);border-radius:6px;position:relative;
+.zone{width:clamp(38px,13vw,64px);height:clamp(61px,20vw,98px);border-radius:6px;position:relative;
   display:flex;align-items:center;justify-content:center;transition:box-shadow .15s;flex-shrink:0;}
 .zone.mon{background:var(--zone);border:2px dashed var(--zone-border);}
 .zone.st{background:var(--spellzone);border:2px dashed var(--spellzone-border);}
@@ -78,7 +78,7 @@ button{font-family:inherit;cursor:pointer;}
 .zone.placeable{box-shadow:0 0 0 3px var(--gold),0 0 14px rgba(217,180,90,.6);cursor:pointer;}
 
 .hand-row{display:flex;justify-content:center;gap:clamp(3px,1.2vw,6px);flex:0 0 auto;padding:4px 0;
-  min-height:clamp(58px,16.8vw,96px);align-items:flex-end;flex-wrap:wrap;}
+  min-height:clamp(66px,18.4vw,106px);align-items:flex-end;flex-wrap:wrap;}
 .hand-row.opp{min-height:clamp(44px,12.6vw,70px);align-items:flex-start;}
 .hand-row.active-turn .card{box-shadow:0 0 0 2px var(--turnglow),0 0 10px 2px var(--turnglow);}
 
@@ -133,7 +133,7 @@ button{font-family:inherit;cursor:pointer;}
 #dice-result{font-size:.95em;text-align:center;min-height:20px;font-weight:600;color:var(--ink);}
 
 /* card visuals */
-.card{width:clamp(36px,12.4vw,60px);height:clamp(50px,17.4vw,84px);border-radius:5px;
+.card{width:clamp(36px,12.4vw,60px);height:clamp(58px,20vw,94px);border-radius:5px;
   position:relative;overflow:hidden;cursor:pointer;transition:transform .12s;flex-shrink:0;
   user-select:none;font-size:clamp(7px,2.2vw,12px);}
 .card:hover{transform:translateY(-6px);z-index:5;}
@@ -153,14 +153,18 @@ button{font-family:inherit;cursor:pointer;}
 .card.faceup.Spell{background:linear-gradient(160deg,#7ee0a3,#2f8a55);color:#062712;}
 .card.faceup.Trap{background:linear-gradient(160deg,#e88bb0,#a13060);color:#2e0416;}
 .card .c-top{display:flex;align-items:flex-start;gap:2px;}
-.card .c-name{font-weight:800;font-size:1.05em;white-space:nowrap;overflow:hidden;
-  text-overflow:ellipsis;flex:1;min-width:0;}
-.card .c-art{flex:1;display:flex;align-items:center;justify-content:center;
+.card .c-name{font-weight:800;font-size:.78em;line-height:1.12;white-space:normal;
+  overflow:hidden;max-height:2.3em;word-break:break-word;flex:1;min-width:0;}
+.card .c-art{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
   font-size:2.1em;line-height:1;margin:1px 0;background:rgba(0,0,0,.14);border-radius:3px;
   filter:drop-shadow(0 1px 1px rgba(0,0,0,.4));}
 .card .c-mid{flex:0 0 auto;display:flex;align-items:center;justify-content:center;text-align:center;
   font-size:.72em;opacity:.85;padding:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.card .c-bot{display:flex;justify-content:space-between;font-weight:700;font-size:.95em;}
+.card .c-bot{display:flex;justify-content:space-between;align-items:flex-end;
+  font-weight:700;font-size:.85em;}
+.card .c-bot .c-stats{display:flex;flex-direction:column;align-items:flex-end;line-height:1.2;}
+.card .c-bot .c-level{flex:0 0 auto;font-size:.85em;font-weight:800;color:var(--gold);
+  background:rgba(0,0,0,.35);border-radius:3px;padding:0 4px;align-self:flex-end;}
 .card .c-badge{flex:0 0 auto;font-size:.8em;background:rgba(0,0,0,.35);
   border-radius:3px;padding:0 2px;white-space:nowrap;}
 .card.big .c-name{font-size:1em;}
@@ -209,7 +213,8 @@ button{font-family:inherit;cursor:pointer;}
   padding:2px 4px;font-weight:700;}
 .card.zoom .c-desc{flex:1;font-size:.68em;line-height:1.35;padding:3px 5px;overflow-y:auto;
   white-space:pre-wrap;}
-.card.zoom .c-bot{font-size:1em;padding-top:2px;}
+.card.zoom .c-bot{font-size:1em;padding-top:2px;flex-direction:row;justify-content:space-between;align-items:center;}
+.card.zoom .c-name{max-height:none;}
 .card.zoom.facedown{display:flex;align-items:center;justify-content:center;}
 .card.zoom.facedown::after{font-size:2.4em;}
 
@@ -444,7 +449,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v15';
+const GAME_VERSION='v16';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 /* ============================= CARD DATABASE ============================= */
 const ATTRS=['LIGHT','DARK','EARTH','WATER','FIRE','WIND'];
@@ -996,9 +1001,11 @@ function renderCardEl(card,opts){
     if(opts.zoneCard && card.pos==='def') d.classList.add('def');
     const top=document.createElement('div'); top.className='c-top';
     const name=document.createElement('div'); name.className='c-name'; name.textContent=b.n; top.appendChild(name);
-    const badge=document.createElement('div'); badge.className='c-badge';
-    badge.textContent = b.cat==='Monster' ? ('Lv'+b.l) : b.cat[0];
-    top.appendChild(badge);
+    if(b.cat!=='Monster'){
+      const badge=document.createElement('div'); badge.className='c-badge';
+      badge.textContent=b.cat[0];
+      top.appendChild(badge);
+    }
     d.appendChild(top);
     const art=document.createElement('div'); art.className='c-art'; art.textContent=b.em; d.appendChild(art);
     const mid=document.createElement('div'); mid.className='c-mid';
@@ -1008,7 +1015,7 @@ function renderCardEl(card,opts){
     if(b.cat==='Monster'){
       const bot=document.createElement('div'); bot.className='c-bot';
       const atk=card.zone>=0?effAtk(card):b.atk, def=card.zone>=0?effDef(card):b.def;
-      bot.innerHTML=`<span>${atk}</span><span>${def}</span>`;
+      bot.innerHTML=`<span class="c-level">${b.l}</span><span class="c-stats"><span class="c-atk">⚔${atk}</span><span class="c-def">🛡${def}</span></span>`;
       d.appendChild(bot);
       if(card.zone>=0 && G.attrMod && b.a===G.attrMod.a){
         const am=document.createElement('div'); am.className='atkmod-badge '+(G.attrMod.delta>=0?'up':'down');
