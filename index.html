@@ -163,6 +163,7 @@ button{font-family:inherit;cursor:pointer;}
 .card .c-bot{display:flex;justify-content:space-between;align-items:flex-end;
   font-weight:700;font-size:.85em;}
 .card .c-bot .c-stats{display:flex;flex-direction:column;align-items:flex-end;line-height:1.2;}
+.card .c-bot .c-def{opacity:.8;font-size:.9em;border-top:1px solid rgba(0,0,0,.25);}
 .card .c-bot .c-level{flex:0 0 auto;font-size:.85em;font-weight:800;color:var(--gold);
   background:rgba(0,0,0,.35);border-radius:3px;padding:0 4px;align-self:flex-end;}
 .card .c-badge{flex:0 0 auto;font-size:.8em;background:rgba(0,0,0,.35);
@@ -449,7 +450,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v16';
+const GAME_VERSION='v17';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 /* ============================= CARD DATABASE ============================= */
 const ATTRS=['LIGHT','DARK','EARTH','WATER','FIRE','WIND'];
@@ -1015,7 +1016,7 @@ function renderCardEl(card,opts){
     if(b.cat==='Monster'){
       const bot=document.createElement('div'); bot.className='c-bot';
       const atk=card.zone>=0?effAtk(card):b.atk, def=card.zone>=0?effDef(card):b.def;
-      bot.innerHTML=`<span class="c-level">${b.l}</span><span class="c-stats"><span class="c-atk">⚔${atk}</span><span class="c-def">🛡${def}</span></span>`;
+      bot.innerHTML=`<span class="c-level">${b.l}</span><span class="c-stats"><span class="c-atk">${atk}</span><span class="c-def">${def}</span></span>`;
       d.appendChild(bot);
       if(card.zone>=0 && G.attrMod && b.a===G.attrMod.a){
         const am=document.createElement('div'); am.className='atkmod-badge '+(G.attrMod.delta>=0?'up':'down');
