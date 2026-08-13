@@ -80,6 +80,8 @@ button{font-family:inherit;cursor:pointer;}
 .zone{width:clamp(38px,13vw,64px);height:clamp(61px,20vw,98px);border-radius:6px;position:relative;
   display:flex;align-items:center;justify-content:center;transition:box-shadow .15s;flex-shrink:0;}
 .zone.mon{background:var(--zone);border:2px dashed var(--zone-border);}
+.zone.mon[data-side="1"]{background:#2a1013;border-color:#8a2a35;}
+.zone.mon[data-side="0"]{background:#0d1a2a;border-color:#2a6bb0;}
 .zone.st{background:var(--spellzone);border:2px dashed var(--spellzone-border);}
 .zone.targetable{box-shadow:0 0 0 3px var(--danger),0 0 14px var(--danger);cursor:crosshair;}
 .zone.placeable{box-shadow:0 0 0 3px var(--gold),0 0 14px rgba(217,180,90,.6);cursor:pointer;}
@@ -458,7 +460,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v19';
+const GAME_VERSION='v20';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
