@@ -11,7 +11,7 @@
   --spellzone:#123244; --spellzone-border:#2a5a7a;
   --panel:#0d1712; --panel2:#122019; --danger:#c0483f; --good:#4a9d5f;
   --mon-normal:#e8c15a; --mon-effect:#e08a3c; --mon-flip:#c9722f;
-  --spell:#3fae6a; --trap:#c94f7c; --back:#2a3f6b;
+  --spell:#3fae6a; --trap:#c94f7c; --back:#2a3f6b; --turnglow:#c9a3f7;
 }
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;min-height:100%;background:#050a07;color:var(--ink);
@@ -80,6 +80,7 @@ button{font-family:inherit;cursor:pointer;}
 .hand-row{display:flex;justify-content:center;gap:clamp(3px,1.2vw,6px);flex:0 0 auto;padding:4px 0;
   min-height:clamp(58px,16.8vw,96px);align-items:flex-end;flex-wrap:wrap;}
 .hand-row.opp{min-height:clamp(44px,12.6vw,70px);align-items:flex-start;}
+.hand-row.active-turn .card{box-shadow:0 0 0 2px var(--turnglow),0 0 10px 2px var(--turnglow);}
 
 .center-row{display:flex;align-items:center;justify-content:center;gap:clamp(6px,3vw,22px);
   flex:0 0 auto;min-height:0;flex-wrap:wrap;padding:2px 0;}
@@ -443,7 +444,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v14';
+const GAME_VERSION='v15';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 /* ============================= CARD DATABASE ============================= */
 const ATTRS=['LIGHT','DARK','EARTH','WATER','FIRE','WIND'];
@@ -1120,6 +1121,8 @@ function render(){
   renderZoneRow('mon-me',ME,'mon'); renderZoneRow('st-me',ME,'st');
   renderZoneRow('mon-opp',BOT,'mon'); renderZoneRow('st-opp',BOT,'st');
   renderHandRow('hand-me',ME); renderHandRow('hand-opp',BOT);
+  document.getElementById('hand-me').classList.toggle('active-turn',G.active===ME);
+  document.getElementById('hand-opp').classList.toggle('active-turn',G.active===BOT);
 
   const phaseLabels={draw:'Draw',standby:'Standby',main1:'Main 1',battle:'Battle',main2:'Main 2',end:'End'};
   document.getElementById('turn-banner').textContent = (G.active===ME?"YOUR TURN":"BOT'S TURN")+` · Turn ${G.turnNum} · ${phaseLabels[G.phase]}`;
