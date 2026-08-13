@@ -44,6 +44,11 @@ button{font-family:inherit;cursor:pointer;}
 @keyframes diespin{0%{transform:rotate(0)}70%{transform:rotate(720deg)}100%{transform:rotate(1080deg)}}
 #version-tag{position:absolute;left:0;right:0;bottom:8px;text-align:center;
   font-size:.68em;color:var(--dim);opacity:.6;pointer-events:none;}
+#recache-btn{display:block;margin:14px auto 0;
+  background:#16281c;border:1px solid var(--gold-dim);color:var(--dim);
+  font-size:.72em;padding:5px 14px;border-radius:14px;white-space:nowrap;}
+#recache-btn:hover{border-color:var(--gold);color:var(--ink);}
+#recache-btn:disabled{opacity:.6;}
 
 /* ---------- BOARD ---------- */
 #game-root{display:none;position:relative;min-height:100vh;min-height:100dvh;background:
@@ -368,6 +373,7 @@ button{font-family:inherit;cursor:pointer;}
     </div>
     <div style="height:22px"></div>
     <button id="start-btn">Begin Duel</button>
+    <button id="recache-btn" type="button">↻ Force Refresh</button>
   </div>
   <div id="coin-flip-wrap">
     <p class="sub" style="margin:0">Rolling for first turn...</p>
@@ -450,8 +456,25 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v17';
+const GAME_VERSION='v18';
 document.getElementById('version-tag').textContent=GAME_VERSION;
+document.getElementById('recache-btn').addEventListener('click',async()=>{
+  const btn=document.getElementById('recache-btn');
+  btn.disabled=true; btn.textContent='Refreshing…';
+  try{
+    if(window.caches && caches.keys){
+      const keys=await caches.keys();
+      await Promise.all(keys.map(k=>caches.delete(k)));
+    }
+    if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+      const regs=await navigator.serviceWorker.getRegistrations();
+      await Promise.all(regs.map(r=>r.unregister()));
+    }
+  }catch(e){}
+  const url=new URL(location.href);
+  url.searchParams.set('_r',Date.now().toString());
+  location.replace(url.toString());
+});
 /* ============================= CARD DATABASE ============================= */
 const ATTRS=['LIGHT','DARK','EARTH','WATER','FIRE','WIND'];
 function slug(n){return n.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');}
