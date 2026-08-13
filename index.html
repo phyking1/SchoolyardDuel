@@ -299,6 +299,20 @@ button{font-family:inherit;cursor:pointer;}
   display:flex;align-items:center;justify-content:center;cursor:pointer;}
 .modal .mopt-peek:hover{border-color:var(--gold);background:rgba(0,0,0,.5);}
 .modal p.hint{color:var(--dim);font-size:.85em;}
+
+/* attack-target picker: spatial grid in Table View (mirrors the actual seating), plain stacked
+   list in List View (mirrors the opponent-stack order) */
+.attack-target-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0;}
+.attack-target-cell{min-height:52px;display:flex;align-items:center;justify-content:center;}
+.attack-target-cell .mopt{width:100%;min-width:0;}
+.attack-target-you{color:var(--dim);font-size:.8em;font-style:italic;border:1px dashed #333;
+  border-radius:7px;}
+.attack-target-list{display:flex;flex-direction:column;gap:8px;margin:10px 0;}
+.attack-target-list .mopt{width:100%;}
+#peek-resume-btn{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 44px);
+  transform:translateX(-50%);z-index:85;background:var(--panel2);border:1px solid var(--gold);
+  color:var(--gold);border-radius:20px;padding:9px 20px;font-weight:700;font-size:.85em;
+  box-shadow:0 4px 16px rgba(0,0,0,.6);cursor:pointer;}
 #toast{position:fixed;top:14px;left:50%;transform:translateX(-50%);background:#16281c;
   border:1px solid var(--gold);color:var(--ink);padding:8px 18px;border-radius:20px;z-index:90;
   font-size:.9em;display:none;box-shadow:0 4px 14px rgba(0,0,0,.5);}
@@ -528,7 +542,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v39';
+const GAME_VERSION='v40';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -2151,9 +2165,68 @@ function beginAttackDeclare(atkIdx){
   const opponents=livingSeats().filter(s=>s!==ME);
   if(!opponents.length) return; // game should already be over
   if(opponents.length===1){ startAttackTargetSelect(atkIdx,opponents[0]); return; }
-  showModal('Declare Attack','Attack which player?',
-    opponents.map(s=>({label:`${pName(s)} (${G.health[s]} HP)`,action:()=>startAttackTargetSelect(atkIdx,s)}))
-      .concat([{label:'Cancel',action:()=>{}}]));
+  showAttackTargetModal(opponents,(s)=>startAttackTargetSelect(atkIdx,s));
+}
+// Which corner of the Table View grid seat `seat` sits in -- mirrors buildTableView()'s clockwise
+// seating (seat1=across from you, seat2=across from your neighbor [4P only], last seat=neighbor).
+function tableQuadrantForSeat(seat){
+  const hasNeighbor=G.numPlayers>=3, neighborSeat=G.numPlayers-1;
+  if(hasNeighbor && seat===neighborSeat) return 'bottom-right';
+  if(seat===1) return 'top-left';
+  return 'top-right';
+}
+// Attack-target picker whose button layout mirrors whatever view mode is currently on screen: a
+// spatial 2x2 grid matching actual seating in Table View, or a plain top-to-bottom list matching
+// the opponent-stack order in List View. Includes a Peek button that dismisses the picker so you
+// can freely pan/scroll the real board, then reopens the same picker when you're done.
+function showAttackTargetModal(opponents,onPick){
+  const bg=document.createElement('div'); bg.className='modal-bg';
+  const m=document.createElement('div'); m.className='modal';
+  m.innerHTML='<h3>Declare Attack</h3><p class="hint">Attack which player?</p>';
+
+  const makeBtn=(seat)=>{
+    const d=document.createElement('div'); d.className='mopt';
+    d.innerHTML=`<span class="mopt-label">${pName(seat)} (${G.health[seat]} HP)</span>`;
+    d.addEventListener('click',()=>{ document.body.removeChild(bg); onPick(seat); });
+    return d;
+  };
+
+  const body=document.createElement('div');
+  if(G.viewMode==='table'){
+    body.className='attack-target-grid';
+    const bySeat={}; opponents.forEach(s=>{ bySeat[tableQuadrantForSeat(s)]=s; });
+    ['top-left','top-right','bottom-left','bottom-right'].forEach(q=>{
+      const cell=document.createElement('div'); cell.className='attack-target-cell';
+      if(q==='bottom-left'){ cell.classList.add('attack-target-you'); cell.textContent='You'; }
+      else if(bySeat[q]!=null) cell.appendChild(makeBtn(bySeat[q]));
+      body.appendChild(cell);
+    });
+  } else {
+    body.className='attack-target-list';
+    opponents.forEach(s=>body.appendChild(makeBtn(s)));
+  }
+  m.appendChild(body);
+
+  const btnRow=document.createElement('div'); btnRow.className='mrow';
+  const peekBtn=document.createElement('div'); peekBtn.className='mopt';
+  peekBtn.innerHTML='<span class="mopt-label">👁 Peek Field</span>';
+  peekBtn.addEventListener('click',()=>{
+    document.body.removeChild(bg);
+    showPeekResumeButton(()=>showAttackTargetModal(opponents,onPick));
+  });
+  const cancelBtn=document.createElement('div'); cancelBtn.className='mopt';
+  cancelBtn.innerHTML='<span class="mopt-label">Cancel</span>';
+  cancelBtn.addEventListener('click',()=>{ document.body.removeChild(bg); });
+  btnRow.append(peekBtn,cancelBtn);
+  m.appendChild(btnRow);
+
+  bg.appendChild(m); document.body.appendChild(bg);
+}
+function showPeekResumeButton(onResume){
+  const btn=document.createElement('button'); btn.type='button'; btn.id='peek-resume-btn';
+  btn.textContent='✅ Done Peeking';
+  btn.addEventListener('click',()=>{ btn.remove(); onResume(); });
+  document.body.appendChild(btn);
 }
 function startAttackTargetSelect(atkIdx,targetPlayer){
   const oppMons=G.players[targetPlayer].mon.some(m=>m);
