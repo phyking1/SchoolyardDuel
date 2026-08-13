@@ -465,7 +465,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v24';
+const GAME_VERSION='v25';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -831,6 +831,11 @@ function humanDrawClick(){
 }
 
 function doStandbyPhase(){
+  const lavaGolem=G.players[G.active].mon.find(m=>m && !m.faceDown && base(m).fx==='lava_golem');
+  if(lavaGolem){
+    dealDamage(G.active,700);
+    log(`Lava Golem inflicts 700 damage during the Standby Phase!`, G.active===ME?'me':'opp');
+  }
   G.gy.forEach(c=>{
     if(isMonster(c) && base(c).fx==='spirit_of_the_fall_wind' && c.controller===G.active){
       gainHealth(G.active,500);
@@ -1168,14 +1173,17 @@ function renderZoneRow(elId,pIdx,type){
     el.appendChild(zone);
   }
 }
+function isCeremonialBellActive(){
+  return [ME,BOT].some(s=>G.players[s].mon.some(m=>m && !m.faceDown && base(m).fx==='ceremonial_bell'));
+}
 function renderHandRow(elId,pIdx){
   const el=document.getElementById(elId);
   el.innerHTML='';
   const hand=G.players[pIdx].hand;
+  const faceDown = pIdx===BOT && !isCeremonialBellActive();
   hand.forEach(card=>{
-    const faceDown = pIdx===BOT;
     const cel=renderCardEl(card,{faceDown, onClick: pIdx===ME? ()=>onHandCardClick(card): null});
-    if(pIdx===BOT) cel.classList.add('opp-back');
+    if(faceDown) cel.classList.add('opp-back');
     if(G.selection && G.selection.type==='hand' && G.selection.uid===card.uid) cel.classList.add('selected');
     if(justPlacedSet.has(card.uid)) cel.classList.add('pop-in');
     el.appendChild(cel);
@@ -1280,6 +1288,11 @@ function onHandCardClick(card){
   if(G.active!==ME) return;
   if(G.phase!=='main1' && G.phase!=='main2') { toast("You can only play cards during a Main Phase."); return; }
   const b=base(card);
+  if(b.fx==='lava_golem'){
+    if(allOwnedMonsters(BOT).length<2){ toast("Your opponent needs at least 2 monsters to Tribute for Lava Golem."); return; }
+    openLavaGolemTributeModal(card);
+    return;
+  }
   if(b.cat==='Monster'){
     if(G.players[ME].normalSummonUsed){ toast('Already used your Normal Summon this turn.'); return; }
     G.selection={type:'hand',uid:card.uid,mode:'monster'};
@@ -1339,15 +1352,16 @@ function tryPlaceMonster(card,idx){
     {label:'Set',action:()=>finishSummon(card,idx,true,[])},
   ]);
 }
-function openTributeModal(card,idx,need){
+function openTributeModal(card,idx,need,tributeSide,onConfirm){
+  if(tributeSide===undefined) tributeSide=ME;
   const owned=[];
-  G.players[ME].mon.forEach((m,i)=>{ if(m) owned.push(i); });
+  G.players[tributeSide].mon.forEach((m,i)=>{ if(m) owned.push(i); });
   const selected=new Set();
   const bg=document.createElement('div'); bg.className='modal-bg';
   const m=document.createElement('div'); m.className='modal';
   const head=document.createElement('h3'); head.textContent=`Tribute ${need} Monster${need>1?'s':''}`;
   const counter=document.createElement('p'); counter.className='hint';
-  counter.textContent=`Choose ${need} of your monsters to Tribute for ${base(card).n}. Tap the eye to view a card first.`;
+  counter.textContent=`Choose ${need} of ${tributeSide===ME?'your':"your opponent's"} monsters to Tribute for ${base(card).n}. Tap the eye to view a card first.`;
   const status=document.createElement('p'); status.className='hint';
   const list=document.createElement('div'); list.className='card-list-rows';
   m.append(head,counter,list,status);
@@ -1357,7 +1371,7 @@ function openTributeModal(card,idx,need){
     confirmBtn.classList.toggle('disabled',selected.size!==need);
   }
   owned.forEach(zi=>{
-    const c=G.players[ME].mon[zi];
+    const c=G.players[tributeSide].mon[zi];
     const d=base(c);
     const row=document.createElement('div'); row.className='card-list-row tribute-row';
     const check=document.createElement('span'); check.className='tribute-check'; check.textContent='⬜';
@@ -1388,6 +1402,7 @@ function openTributeModal(card,idx,need){
     if(selected.size!==need) return;
     document.body.removeChild(bg);
     const tribs=[...selected];
+    if(onConfirm){ onConfirm(tribs); return; }
     showModal(base(card).n,'Summon face-up (Attack Position) or Set face-down (Defense Position)?',[
       {label:'Tribute Summon',action:()=>finishSummon(card,idx,false,tribs)},
       {label:'Tribute Set',action:()=>finishSummon(card,idx,true,tribs)},
@@ -1401,6 +1416,25 @@ function openTributeModal(card,idx,need){
 
   bg.appendChild(m); document.body.appendChild(bg);
   refresh();
+}
+function openLavaGolemTributeModal(card){
+  openTributeModal(card,-1,2,BOT,(tribs)=>finishLavaGolemSummon(card,tribs));
+}
+function finishLavaGolemSummon(card,tributeIdxs){
+  tributeIdxs.sort((a,b)=>b-a).forEach(i=>{
+    const t=G.players[BOT].mon[i];
+    sendToGY(BOT,t,'mon',i,'tribute');
+    log(`Tributed ${base(t).n}.`,'me');
+  });
+  G.players[ME].hand=G.players[ME].hand.filter(c=>c.uid!==card.uid);
+  const z=findEmptyZone(BOT,'mon');
+  card.faceDown=false; card.pos='atk'; card.controller=BOT; card.zone=z;
+  card.summonedTurn=G.turnNum; card.attacked=false; card.equips=[]; card.tempAtk=0;
+  G.players[BOT].mon[z]=card;
+  log(`You Special Summon Lava Golem to the Bot's field!`,'me');
+  SFX.place(); markJustPlaced(card.uid);
+  render();
+  afterAnySummon(BOT,card,z,false,true);
 }
 function onZoneCardClick(pIdx,type,idx){
   if(G.selection && G.selection.type==='attack' && G.selection.stage==='target' && pIdx===BOT && type==='mon'){
@@ -1569,10 +1603,12 @@ function afterSummon(pIdx,card,idx){
   afterAnySummon(pIdx,card,idx,false);
 }
 function afterAnySummon(pIdx,card,idx,wasSetOrFlip,isSpecial){
-  // Princess of Tsurugi (controlled by the opponent of the summoner)
+  // Princess of Tsurugi triggers on Normal/Flip Summons only (controlled by the opponent of the summoner)
   const opp=1-pIdx;
-  const pt=G.players[opp].mon.find(m=>m && !m.faceDown && base(m).fx==='princess_of_tsurugi');
-  if(pt){ dealDamage(pIdx,500); log(`Princess of Tsurugi inflicts 500 damage.`, pIdx===ME?'opp':'me'); }
+  if(!isSpecial){
+    const pt=G.players[opp].mon.find(m=>m && !m.faceDown && base(m).fx==='princess_of_tsurugi');
+    if(pt){ dealDamage(pIdx,500); log(`Princess of Tsurugi inflicts 500 damage.`, pIdx===ME?'opp':'me'); }
+  }
   // Trap window: Trap Hole / Torrential Tribute / Floodgate Trap Hole / Horn of Heaven controlled by the opponent
   openSummonTrapWindow(pIdx,card,idx,!!isSpecial);
 }
@@ -2224,9 +2260,24 @@ function botMainPhase(){
 }
 function botStep1(){
   const p=G.players[BOT];
+  const lgIdx=p.hand.findIndex(c=>base(c).fx==='lava_golem');
+  if(lgIdx>=0 && allOwnedMonsters(ME).length>=2){
+    const card=p.hand[lgIdx];
+    const tribs=allOwnedMonsters(ME).slice(0,2);
+    tribs.sort((a,b2)=>b2-a).forEach(i=>{ const t=G.players[ME].mon[i]; sendToGY(ME,t,'mon',i,'tribute'); });
+    p.hand.splice(lgIdx,1);
+    const z=findEmptyZone(ME,'mon');
+    card.faceDown=false; card.pos='atk'; card.controller=ME; card.zone=z;
+    card.summonedTurn=G.turnNum; card.attacked=false; card.equips=[]; card.tempAtk=0;
+    G.players[ME].mon[z]=card;
+    log(`Bot Special Summons Lava Golem to your field!`,'opp');
+    SFX.place(); markJustPlaced(card.uid);
+    render();
+    afterAnySummon(ME,card,z,false,true);
+  }
   // Play a monster if possible
   if(!p.normalSummonUsed){
-    const idx=p.hand.findIndex(c=>isMonster(c));
+    const idx=p.hand.findIndex(c=>isMonster(c) && base(c).fx!=='lava_golem');
     if(idx>=0){
       const card=p.hand[idx];
       const b=base(card);
