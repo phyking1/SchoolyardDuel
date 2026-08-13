@@ -132,6 +132,13 @@ button{font-family:inherit;cursor:pointer;}
 #board.table-mode #hand-me{display:none;}
 #board-wrap.table-mode #hp-rail-me{display:none;}
 #board.table-mode{touch-action:pan-y;justify-content:flex-start;padding-bottom:38px;}
+
+/* 2-player mode: health lives in a horizontal bar under your own board instead of a side rail,
+   and there's nothing useful to pan to, so the List/Table View toggle is hidden entirely. */
+#hp-bar-me-bottom{display:none;}
+#board.two-player-mode #hp-bar-me-bottom{display:flex;margin-top:2px;}
+#board-wrap.two-player-mode #hp-rail-me{display:none;}
+#board.two-player-mode #view-toggle-row{display:none;}
 #table-view-top,#table-view-bottom{flex:1 1 0;min-height:150px;overflow:hidden;}
 #table-scroll-top,#table-scroll-bottom{display:flex;overflow-x:hidden;touch-action:none;
   height:100%;scrollbar-width:none;gap:10px;padding:0 7%;}
@@ -318,10 +325,19 @@ button{font-family:inherit;cursor:pointer;}
   font-size:.9em;display:none;box-shadow:0 4px 14px rgba(0,0,0,.5);}
 
 /* card browser: deck list / graveyard */
-#decklist-btn{position:fixed;top:10px;right:10px;z-index:51;width:38px;height:38px;border-radius:50%;
-  background:#16281c;border:1px solid var(--gold-dim);color:var(--ink);font-size:1.1em;
-  display:flex;align-items:center;justify-content:center;}
-#decklist-btn:hover{border-color:var(--gold);}
+#decklist-btn,#viewlog-btn,#exitgame-btn{position:fixed;top:10px;z-index:51;width:38px;height:38px;
+  border-radius:50%;background:#16281c;border:1px solid var(--gold-dim);color:var(--ink);
+  font-size:1.1em;display:flex;align-items:center;justify-content:center;}
+#decklist-btn{right:10px;}
+#viewlog-btn{right:56px;}
+#exitgame-btn{right:102px;}
+#decklist-btn:hover,#viewlog-btn:hover,#exitgame-btn:hover{border-color:var(--gold);}
+#log-modal-list{max-height:60vh;overflow-y:auto;display:flex;flex-direction:column;
+  gap:2px;margin:10px 0;text-align:left;font-size:.85em;}
+#log-modal-list .lg{padding:4px 2px;border-bottom:1px solid rgba(255,255,255,.06);}
+#log-modal-list .lg.me{color:#9fd6b0;}
+#log-modal-list .lg.opp{color:#e0a2b8;}
+#log-modal-list .lg.sys{color:var(--gold-dim);}
 .card-list-rows{max-height:50vh;overflow-y:auto;display:flex;flex-direction:column;gap:4px;margin:10px 0;}
 .card-list-row{display:flex;align-items:center;gap:8px;padding:6px 8px;border-radius:6px;
   background:#16281c;border:1px solid var(--gold-dim);cursor:pointer;text-align:left;}
@@ -424,11 +440,11 @@ button{font-family:inherit;cursor:pointer;}
   #phase-track{display:none;}
   #detail-panel{position:fixed;left:0;right:0;bottom:0;width:100%;flex:none;
     border-left:none;border-top:2px solid #1c3324;max-height:32vh;z-index:65;
-    transform:translateY(calc(100% - 34px));transition:transform .25s ease;
+    transform:translateY(calc(100% - 44px));transition:transform .25s ease;
     box-shadow:0 -6px 18px rgba(0,0,0,.5);padding:0 12px 12px;}
   #detail-panel.expanded{transform:translateY(0);}
   #detail-handle{display:flex;align-items:center;justify-content:space-between;gap:8px;
-    margin:0 -12px 8px;padding:8px 12px;cursor:pointer;background:#16281c;
+    margin:0 -12px 8px;padding:13px 12px;cursor:pointer;background:#16281c;
     border-bottom:1px solid #234;font-size:.75em;color:var(--dim);}
   #detail-handle-text{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
   #log-panel{max-height:26vh;}
@@ -439,6 +455,8 @@ button{font-family:inherit;cursor:pointer;}
 <body>
 
 <button id="decklist-btn" title="View Deck List">📜</button>
+<button id="viewlog-btn" title="View Full Log">📋</button>
+<button id="exitgame-btn" title="Exit Game">🚪</button>
 <div id="turn-flash-wrap"><div id="turn-flash-text"></div></div>
 
 <div id="start-screen">
@@ -507,6 +525,12 @@ button{font-family:inherit;cursor:pointer;}
       <div class="zone-row" id="mon-me"></div>
       <div class="zone-row" id="st-me"></div>
       <div class="hand-row" id="hand-me"></div>
+      <div class="opp-panel-header" id="hp-bar-me-bottom">
+        <div class="opp-panel-name">You</div>
+        <div class="opp-hp-bar-wrap"><div class="opp-hp-bar" id="hb-me-bottom"></div></div>
+        <div class="opp-hp-num" id="hn-me-bottom">8000</div>
+        <div class="opp-hand-count" id="handcount-me-bottom">H:0</div>
+      </div>
     </div>
     <div class="hp-rail" id="hp-rail-me">
       <div class="hp-rail-name">You</div>
@@ -542,7 +566,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v40';
+const GAME_VERSION='v41';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -941,6 +965,8 @@ function switchViewMode(mode){
 function beginDuel(){
   document.getElementById('start-screen').style.display='none';
   document.getElementById('game-root').style.display='flex';
+  document.getElementById('board').classList.toggle('two-player-mode',G.numPlayers===2);
+  document.getElementById('board-wrap').classList.toggle('two-player-mode',G.numPlayers===2);
   G.health=Array(G.numPlayers).fill(G.startHealth);
   G.noBattleDamage=Array(G.numPlayers).fill(false);
   G.isBot=Array.from({length:G.numPlayers},(_,i)=>i!==ME);
@@ -951,6 +977,7 @@ function beginDuel(){
   ));
   buildOpponentPanels();
   buildTableView();
+  switchViewMode(G.numPlayers>=3 ? 'table' : 'list');
   // opening hands: 5 each
   for(let i=0;i<5;i++){
     for(let s=0;s<G.numPlayers;s++) drawCard(s,true);
@@ -1471,6 +1498,10 @@ function render(){
   document.getElementById('deck-count').textContent=G.deck.length;
   document.getElementById('gy-count').textContent=G.gy.length;
   document.getElementById('handcount-me').textContent='H:'+G.players[ME].hand.length;
+  // 2P mode's horizontal bottom health bar mirrors the same data as the side rail.
+  document.getElementById('hb-me-bottom').style.width=(100*Math.max(0,G.health[ME])/G.startHealth)+'%';
+  document.getElementById('hn-me-bottom').textContent=G.health[ME];
+  document.getElementById('handcount-me-bottom').textContent='H:'+G.players[ME].hand.length;
 
   renderZoneRow('mon-me',ME,'mon'); renderZoneRow('st-me',ME,'st');
   renderHandRow('hand-me',ME);
@@ -1574,7 +1605,17 @@ function renderActionButtons(){
   if(G.phase==='battle'){
     const toM2=document.createElement('button'); toM2.className='abtn primary';
     toM2.textContent='Go to Main Phase 2 ▶';
-    toM2.onclick=()=>{ G.selection=null; advancePhase(); };
+    toM2.onclick=()=>{
+      const hasUnusedAttacker=G.players[ME].mon.some(m=>m && !m.faceDown && m.pos==='atk' && !m.attacked);
+      if(hasUnusedAttacker){
+        showModal('End Battle Phase?','You have an Attack Position monster that hasn\'t attacked yet. Are you sure you want to move on?',[
+          {label:'Yes, Move On',action:()=>{ G.selection=null; advancePhase(); }},
+          {label:'Cancel',action:()=>{}},
+        ]);
+      } else {
+        G.selection=null; advancePhase();
+      }
+    };
     el.appendChild(toM2);
   }
   if(G.selection){
@@ -1627,9 +1668,13 @@ function onEmptyZoneClick(pIdx,type,idx){
       showModal(b.n,'How do you want to play this Spell Card?',[
         {label:'Activate',action:()=>placeSpell(card,idx,true)},
         {label:'Set Face-Down',action:()=>placeSpell(card,idx,false)},
+        {label:'Cancel',action:()=>{ G.selection=null; render(); }},
       ]);
     } else {
-      placeTrapSet(card,idx);
+      showModal(b.n,'Set this Trap Card face-down?',[
+        {label:'Set Face-Down',action:()=>placeTrapSet(card,idx)},
+        {label:'Cancel',action:()=>{ G.selection=null; render(); }},
+      ]);
     }
   }
 }
@@ -1663,6 +1708,7 @@ function tryPlaceMonster(card,idx){
   showModal(b.n,'Summon face-up (Attack Position) or Set face-down (Defense Position)?',[
     {label:'Normal Summon',action:()=>finishSummon(card,idx,false,[])},
     {label:'Set',action:()=>finishSummon(card,idx,true,[])},
+    {label:'Cancel',action:()=>{ G.selection=null; render(); }},
   ]);
 }
 function openTributeModal(card,idx,need,tributeSide,onConfirm){
@@ -2793,6 +2839,32 @@ function openCardCarousel(title,defs){
 
 document.getElementById('decklist-btn').addEventListener('click',()=>{
   openCardBrowser('Deck List ('+allCardDefs().length+')', allCardDefs());
+});
+document.getElementById('viewlog-btn').addEventListener('click',showLogModal);
+function showLogModal(){
+  const bg=document.createElement('div'); bg.className='modal-bg';
+  const m=document.createElement('div'); m.className='modal';
+  m.innerHTML='<h3>Battle Log</h3>';
+  const list=document.createElement('div'); list.id='log-modal-list';
+  G.log.slice().reverse().forEach(l=>{
+    const row=document.createElement('div'); row.className='lg '+(l.cls||'sys'); row.textContent=l.msg;
+    list.appendChild(row);
+  });
+  m.appendChild(list);
+  const closeRow=document.createElement('div'); closeRow.className='mrow';
+  const closeBtn=document.createElement('div'); closeBtn.className='mopt';
+  closeBtn.innerHTML='<span class="mopt-label">Close</span>';
+  closeBtn.addEventListener('click',()=>{ document.body.removeChild(bg); });
+  closeRow.appendChild(closeBtn);
+  m.appendChild(closeRow);
+  bg.appendChild(m); document.body.appendChild(bg);
+  bg.addEventListener('click',(e)=>{ if(e.target===bg) document.body.removeChild(bg); });
+}
+document.getElementById('exitgame-btn').addEventListener('click',()=>{
+  showModal('Exit Game?','Your current game will be lost. Are you sure you want to exit?',[
+    {label:'Exit Game',action:()=>{ location.reload(); }},
+    {label:'Cancel',action:()=>{}},
+  ]);
 });
 
 document.getElementById('view-toggle-btn').addEventListener('click',()=>{
