@@ -115,36 +115,29 @@ button{font-family:inherit;cursor:pointer;}
 .opp-hand-count{font-size:clamp(.5em,1.5vw,.62em);color:var(--dim);background:#10241a;
   border:1px solid #234;padding:0 4px;border-radius:4px;white-space:nowrap;flex:0 0 auto;}
 
-/* Table View: pan between two complete, normal-looking 1v1 screens -- page 0 is you vs. the
-   opponent seated across from you, page 1 is your right-hand neighbor vs. the opponent seated
-   across from THEM. The whole screen swaps per page (own board included), not just the top strip,
-   so the top strip and bottom strip scroll in lockstep. */
+/* Table View: everyone's board lives in one continuous space, arranged by seat -- you and your
+   right-hand neighbor along the bottom, the two players facing you along the top -- and you swipe
+   left/right to pan across it. No pages, no buttons: the top and bottom strips are plain
+   horizontally-scrolling rows kept in lockstep, and each panel is sized a little short of full
+   width so the next one always peeks in at the edge as a swipe affordance. */
 #view-toggle-row{display:flex;justify-content:center;padding:2px 0;}
 #view-toggle-btn{background:var(--panel2);border:1px solid var(--gold-dim);color:var(--gold);
   border-radius:8px;padding:3px 10px;font-size:.68em;font-weight:700;cursor:pointer;}
 #view-toggle-btn:hover{border-color:var(--gold);}
-#table-view-top,#table-view-bottom,#table-pan-controls{display:none;}
+#table-view-top,#table-view-bottom{display:none;}
 #board.table-mode #table-view-top,#board.table-mode #table-view-bottom{display:block;}
-#board.table-mode #table-pan-controls{display:flex;}
 #board.table-mode #opp-stack,#board.table-mode #mon-me,#board.table-mode #st-me,
 #board.table-mode #hand-me{display:none;}
 #board-wrap.table-mode #hp-rail-me{display:none;}
 #table-view-top{height:clamp(150px,28vh,215px);}
 #table-view-bottom{height:clamp(150px,28vh,215px);}
-#table-scroll-top,#table-scroll-bottom{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;
-  height:100%;-webkit-overflow-scrolling:touch;scrollbar-width:none;}
+#table-scroll-top,#table-scroll-bottom{display:flex;overflow-x:auto;scroll-snap-type:x proximity;
+  height:100%;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:10px;padding:0 7%;}
 #table-scroll-top::-webkit-scrollbar,#table-scroll-bottom::-webkit-scrollbar{display:none;}
-.table-scene{min-width:100%;flex-shrink:0;scroll-snap-align:start;box-sizing:border-box;
-  display:flex;align-items:stretch;justify-content:center;height:100%;padding:0 8px;}
+.table-scene{flex:0 0 86%;scroll-snap-align:center;box-sizing:border-box;
+  display:flex;align-items:stretch;justify-content:center;height:100%;}
 .table-scene .opp-panel{width:100%;max-width:340px;}
-.table-scene:empty{visibility:hidden;}
-#table-pan-controls{align-items:center;justify-content:center;gap:10px;padding:2px 0;}
-#board.table-mode #table-pan-controls.single-page{display:none;}
-#table-pan-controls button{background:rgba(20,20,20,.65);border:1px solid var(--gold-dim);
-  color:var(--gold);border-radius:50%;width:24px;height:24px;font-size:.72em;line-height:1;cursor:pointer;}
-#table-pan-dots{display:flex;gap:5px;}
-.pan-dot{width:6px;height:6px;border-radius:50%;background:#444;display:inline-block;}
-.pan-dot.active{background:var(--gold);}
+.table-scene:empty{display:none;}
 
 .hand-row{display:flex;justify-content:center;gap:clamp(3px,1.2vw,6px);flex:0 0 auto;padding:4px 0;
   min-height:clamp(66px,18.4vw,106px);align-items:flex-end;flex-wrap:wrap;}
@@ -494,11 +487,6 @@ button{font-family:inherit;cursor:pointer;}
           <div class="table-scene" id="table-scene-bottom-1"></div>
         </div>
       </div>
-      <div id="table-pan-controls">
-        <button id="table-pan-left" type="button">◀</button>
-        <div id="table-pan-dots"><span class="pan-dot active" data-page="0"></span><span class="pan-dot" data-page="1"></span></div>
-        <button id="table-pan-right" type="button">▶</button>
-      </div>
 
       <div class="zone-row" id="mon-me"></div>
       <div class="zone-row" id="st-me"></div>
@@ -538,7 +526,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v34';
+const GAME_VERSION='v35';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -660,7 +648,6 @@ const G={
   startHealth:8000,
   numPlayers:2, // 2-4; seats beyond ME(=0) are bots. Rebuilt by beginDuel() to match.
   viewMode:'list', // 'list' (stacked opponent panels) or 'table' (spatial seating, pan to view)
-  tablePage:0, // which table-view page is currently scrolled into view (0=top, 1=right)
   health:[8000,8000],
   deck:[],gy:[],
   players:[
@@ -896,25 +883,21 @@ function buildTableView(){
     return panel;
   };
 
-  // Page 0: you vs. whoever is seated across from you.
+  // Bottom row, left to right: you, then your right-hand neighbor (seat 1) if there is one.
   sceneBottom0.appendChild(buildPanel('You','tme',null,true));
+  const hasNeighbor = G.numPlayers>=3;
+  if(hasNeighbor) sceneBottom1.appendChild(buildPanel(pName(1),'t1',1,false));
+
+  // Top row, left to right: whoever faces you, then whoever faces your neighbor (seat 3, 4P only)
+  // -- kept in the same left-to-right order as the bottom row so panning the two stays in sync.
   if(G.numPlayers>=2){
     const acrossYou = G.numPlayers>=3 ? 2 : 1; // with a single opponent, they ARE the one across from you
     sceneTop0.appendChild(buildPanel(pName(acrossYou),'t'+acrossYou,acrossYou,false));
   }
+  if(G.numPlayers>=4) sceneTop1.appendChild(buildPanel(pName(3),'t3',3,false));
 
-  // Page 1: your right-hand neighbor (seat 1) vs. whoever is seated across from them (seat 3, 4P only).
-  const hasNeighbor = G.numPlayers>=3;
-  if(hasNeighbor){
-    sceneBottom1.appendChild(buildPanel(pName(1),'t1',1,false));
-    if(G.numPlayers>=4) sceneTop1.appendChild(buildPanel(pName(3),'t3',3,false));
-  }
-
-  document.getElementById('table-pan-controls').classList.toggle('single-page',!hasNeighbor);
   const st=document.getElementById('table-scroll-top'), sb=document.getElementById('table-scroll-bottom');
   if(st) st.scrollLeft=0; if(sb) sb.scrollLeft=0;
-  G.tablePage=0;
-  document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===0));
 }
 function switchViewMode(mode){
   G.viewMode=mode;
@@ -924,8 +907,6 @@ function switchViewMode(mode){
   if(mode==='table'){
     const st=document.getElementById('table-scroll-top'), sb=document.getElementById('table-scroll-bottom');
     if(st) st.scrollLeft=0; if(sb) sb.scrollLeft=0;
-    G.tablePage=0;
-    document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===0));
   }
   render();
 }
@@ -2710,25 +2691,13 @@ document.getElementById('decklist-btn').addEventListener('click',()=>{
 document.getElementById('view-toggle-btn').addEventListener('click',()=>{
   switchViewMode(G.viewMode==='table' ? 'list' : 'table');
 });
-function tableGoToPage(page){
-  const st=document.getElementById('table-scroll-top'), sb=document.getElementById('table-scroll-bottom');
-  if(st) st.scrollLeft=page*st.clientWidth;
-  if(sb) sb.scrollLeft=page*sb.clientWidth;
-  G.tablePage=page;
-  document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===page));
-}
-document.getElementById('table-pan-left').addEventListener('click',()=>tableGoToPage(0));
-document.getElementById('table-pan-right').addEventListener('click',()=>tableGoToPage(1));
-// The top strip (opponent facing whichever bottom seat is in view) and bottom strip (you or your
-// neighbor) must pan together -- whichever one the user actually swipes drives the other to match.
+// The top strip (whoever faces you / your neighbor) and bottom strip (you / your neighbor) must
+// pan together as one continuous board -- whichever one the user actually swipes drives the other
+// to match, by mirroring raw scroll position (both strips use identical panel widths/gaps).
 function syncTableScroll(sourceId,targetId){
   const source=document.getElementById(sourceId), target=document.getElementById(targetId);
   if(!source||!target) return;
-  const page=Math.round(source.scrollLeft/Math.max(1,source.clientWidth));
-  G.tablePage=page;
-  document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===page));
-  const targetPos=page*target.clientWidth;
-  if(Math.abs(target.scrollLeft-targetPos)>4) target.scrollLeft=targetPos;
+  if(Math.abs(target.scrollLeft-source.scrollLeft)>2) target.scrollLeft=source.scrollLeft;
 }
 document.getElementById('table-scroll-top').addEventListener('scroll',()=>syncTableScroll('table-scroll-top','table-scroll-bottom'));
 document.getElementById('table-scroll-bottom').addEventListener('scroll',()=>syncTableScroll('table-scroll-bottom','table-scroll-top'));
