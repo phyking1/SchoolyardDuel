@@ -528,7 +528,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v36';
+const GAME_VERSION='v37';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -879,9 +879,9 @@ function buildTableView(){
         `<div class="opp-hp-num" id="hn-${idSuffix}">${G.startHealth}</div>`+
         `<div class="opp-hand-count" id="handcount-${idSuffix}">H:0</div>`+
       `</div>`;
-    const hand=`<div class="hand-row compact${isMine?'':' opp'}" id="hand-${idSuffix}"></div>`;
-    const st=`<div class="zone-row compact" id="st-${idSuffix}"></div>`;
-    const mon=`<div class="zone-row compact" id="mon-${idSuffix}"></div>`;
+    const hand=`<div class="hand-row${isMine?'':' opp'}" id="hand-${idSuffix}"></div>`;
+    const st=`<div class="zone-row" id="st-${idSuffix}"></div>`;
+    const mon=`<div class="zone-row" id="mon-${idSuffix}"></div>`;
     // Your own panel reads top-to-bottom as monsters/spells (nearest the center of the table) then
     // your hand (nearest you, at the bottom) -- matching the normal board. Opponent panels read the
     // opposite way: their hand near the far edge, their monsters nearest the center.
@@ -1409,6 +1409,25 @@ function isCeremonialBellActive(){
   }
   return false;
 }
+// If a hand has too many cards to fit on one line at their natural size, flex-wrap would drop
+// the overflow onto a second row. Pull the cards into a slight overlap instead so a big hand
+// always reads as one row, exactly like a real card fan.
+function compressHandRow(el){
+  const cards=[...el.children];
+  cards.forEach(c=>{ c.style.marginLeft=''; });
+  if(cards.length<2) return;
+  const firstTop=cards[0].offsetTop;
+  const wraps=cards.some(c=>c.offsetTop!==firstTop);
+  if(!wraps) return;
+  const gap=parseFloat(getComputedStyle(el).columnGap)||0;
+  const cardWidth=cards[0].getBoundingClientRect().width;
+  const n=cards.length;
+  const naturalWidth=n*cardWidth+(n-1)*gap;
+  const overlap=(naturalWidth-el.clientWidth)/(n-1);
+  if(overlap<=0) return;
+  const shift=gap+overlap+2;
+  cards.forEach((c,i)=>{ if(i>0) c.style.marginLeft=(-shift)+'px'; });
+}
 function renderHandRow(elId,pIdx){
   const el=document.getElementById(elId);
   el.innerHTML='';
@@ -1421,6 +1440,7 @@ function renderHandRow(elId,pIdx){
     if(justPlacedSet.has(card.uid)) cel.classList.add('pop-in');
     el.appendChild(cel);
   });
+  compressHandRow(el);
 }
 
 function render(){
