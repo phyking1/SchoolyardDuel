@@ -52,7 +52,9 @@ button{font-family:inherit;cursor:pointer;}
 
 /* ---------- BOARD ---------- */
 #game-root{display:none;position:relative;min-height:100vh;min-height:100dvh;background:
-  radial-gradient(ellipse at 50% 50%,#0e3a22,#04140a 85%);
+  radial-gradient(ellipse 100% 60% at 50% 0%,rgba(139,0,0,.65),transparent 60%),
+  radial-gradient(ellipse 100% 60% at 50% 100%,rgba(0,102,255,.6),transparent 60%),
+  #030304;
   flex-direction:column;align-items:stretch;
   justify-content:center;justify-content:safe center;}
 #board-wrap{position:relative;display:flex;margin:auto 0;}
@@ -456,7 +458,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v18';
+const GAME_VERSION='v19';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
