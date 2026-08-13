@@ -260,6 +260,11 @@ button{font-family:inherit;cursor:pointer;}
 .clr-icon{font-size:1.2em;flex:0 0 auto;}
 .clr-name{flex:1;font-weight:600;}
 .clr-tag{flex:0 0 auto;font-size:.78em;color:var(--dim);white-space:nowrap;}
+.tribute-check{font-size:1.1em;flex:0 0 auto;width:1.2em;text-align:center;}
+.tribute-row.checked{border-color:var(--gold);background:#2a2410;}
+.modal .mopt.primary{background:linear-gradient(180deg,var(--gold),#a9853c);color:#1a1205;font-weight:700;border:none;}
+.modal .mopt.primary:hover{filter:brightness(1.08);}
+.modal .mopt.disabled{opacity:.4;pointer-events:none;}
 .carousel-card-wrap{display:flex;justify-content:center;margin:10px 0;}
 
 #gameover-bg{position:fixed;inset:0;background:rgba(0,0,0,.8);display:none;align-items:center;
@@ -460,7 +465,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v21';
+const GAME_VERSION='v22';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1276,7 +1281,6 @@ function isZonePlaceable(pIdx,type,idx){
 }
 function isZoneTargetable(pIdx,type,idx){
   if(!G.selection) return false;
-  if(G.selection.type==='tribute' && pIdx===ME && type==='mon' && G.players[ME].mon[idx]) return true;
   if(G.selection.type==='attack' && G.selection.stage==='target'){
     if(type!=='mon') return false;
     if(G.selection.mode==='direct') return false;
@@ -1291,9 +1295,8 @@ function tryPlaceMonster(card,idx){
   if(need>0){
     const owned=G.players[ME].mon.filter(m=>m).length;
     if(owned<need){ toast(`Level ${b.l} monster needs ${need} tribute${need>1?'s':''} — you only control ${owned}.`); return; }
-    G.selection={type:'tribute',need,have:[],cardUid:card.uid,targetIdx:idx};
-    toast(`Select ${need} monster${need>1?'s':''} to Tribute.`);
-    render();
+    G.selection=null; render();
+    openTributeModal(card,idx,need);
     return;
   }
   showModal(b.n,'Summon face-up (Attack Position) or Set face-down (Defense Position)?',[
@@ -1301,23 +1304,70 @@ function tryPlaceMonster(card,idx){
     {label:'Set',action:()=>finishSummon(card,idx,true,[])},
   ]);
 }
-function onZoneCardClick(pIdx,type,idx){
-  if(G.selection && G.selection.type==='tribute' && pIdx===ME && type==='mon'){
-    const card=G.players[ME].mon[idx];
-    if(!card) return;
-    G.selection.have.push(idx);
-    if(G.selection.have.length>=G.selection.need){
-      const handCard=G.players[ME].hand.find(c=>c.uid===G.selection.cardUid);
-      const tribs=G.selection.have.slice();
-      const tIdx=G.selection.targetIdx;
-      G.selection=null;
-      showModal(base(handCard).n,'Summon face-up (Attack Position) or Set face-down (Defense Position)?',[
-        {label:'Tribute Summon',action:()=>finishSummon(handCard,tIdx,false,tribs)},
-        {label:'Tribute Set',action:()=>finishSummon(handCard,tIdx,true,tribs)},
-      ]);
-    } else render();
-    return;
+function openTributeModal(card,idx,need){
+  const owned=[];
+  G.players[ME].mon.forEach((m,i)=>{ if(m) owned.push(i); });
+  const selected=new Set();
+  const bg=document.createElement('div'); bg.className='modal-bg';
+  const m=document.createElement('div'); m.className='modal';
+  const head=document.createElement('h3'); head.textContent=`Tribute ${need} Monster${need>1?'s':''}`;
+  const counter=document.createElement('p'); counter.className='hint';
+  counter.textContent=`Choose ${need} of your monsters to Tribute for ${base(card).n}. Tap the eye to view a card first.`;
+  const status=document.createElement('p'); status.className='hint';
+  const list=document.createElement('div'); list.className='card-list-rows';
+  m.append(head,counter,list,status);
+
+  function refresh(){
+    status.textContent=`Selected ${selected.size} of ${need}.`;
+    confirmBtn.classList.toggle('disabled',selected.size!==need);
   }
+  owned.forEach(zi=>{
+    const c=G.players[ME].mon[zi];
+    const d=base(c);
+    const row=document.createElement('div'); row.className='card-list-row tribute-row';
+    const check=document.createElement('span'); check.className='tribute-check'; check.textContent='⬜';
+    const icon=document.createElement('span'); icon.className='clr-icon'; icon.textContent=c.faceDown?'🂠':d.em;
+    const name=document.createElement('span'); name.className='clr-name'; name.textContent=c.faceDown?'Set Monster':d.n;
+    const tag=document.createElement('span'); tag.className='clr-tag';
+    tag.textContent=c.faceDown?'':`Lv${d.l} ${effAtk(c)}/${effDef(c)}`;
+    const peek=document.createElement('button'); peek.type='button'; peek.className='mopt-peek'; peek.title='View card';
+    peek.textContent='👁';
+    peek.addEventListener('click',(e)=>{ e.stopPropagation(); showCardPopup(c,false); });
+    row.append(check,icon,name,tag,peek);
+    row.addEventListener('click',()=>{
+      if(selected.has(zi)){
+        selected.delete(zi); row.classList.remove('checked'); check.textContent='⬜';
+      } else {
+        if(selected.size>=need){ toast(`You can only Tribute ${need} monster${need>1?'s':''}.`); return; }
+        selected.add(zi); row.classList.add('checked'); check.textContent='✅';
+      }
+      refresh();
+    });
+    list.appendChild(row);
+  });
+
+  const btnRow=document.createElement('div'); btnRow.className='mrow';
+  const confirmBtn=document.createElement('div'); confirmBtn.className='mopt primary disabled';
+  confirmBtn.innerHTML='<span class="mopt-label">Confirm Tribute</span>';
+  confirmBtn.addEventListener('click',()=>{
+    if(selected.size!==need) return;
+    document.body.removeChild(bg);
+    const tribs=[...selected];
+    showModal(base(card).n,'Summon face-up (Attack Position) or Set face-down (Defense Position)?',[
+      {label:'Tribute Summon',action:()=>finishSummon(card,idx,false,tribs)},
+      {label:'Tribute Set',action:()=>finishSummon(card,idx,true,tribs)},
+    ]);
+  });
+  const cancelBtn=document.createElement('div'); cancelBtn.className='mopt';
+  cancelBtn.innerHTML='<span class="mopt-label">Cancel</span>';
+  cancelBtn.addEventListener('click',()=>{ document.body.removeChild(bg); });
+  btnRow.append(confirmBtn,cancelBtn);
+  m.appendChild(btnRow);
+
+  bg.appendChild(m); document.body.appendChild(bg);
+  refresh();
+}
+function onZoneCardClick(pIdx,type,idx){
   if(G.selection && G.selection.type==='attack' && G.selection.stage==='target' && pIdx===BOT && type==='mon'){
     resolveAttack(G.selection.attackerIdx, idx);
     return;
