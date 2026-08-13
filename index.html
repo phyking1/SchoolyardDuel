@@ -386,11 +386,7 @@ button{font-family:inherit;cursor:pointer;}
   </div>
   <div id="coin-flip-wrap">
     <p class="sub" style="margin:0">Rolling for first turn...</p>
-    <div style="display:flex;gap:40px;align-items:center;">
-      <div style="text-align:center"><div style="color:var(--dim);font-size:.85em;margin-bottom:6px">YOU</div><div class="die1" id="d1a">?</div></div>
-      <div style="color:var(--gold);font-size:1.4em">VS</div>
-      <div style="text-align:center"><div style="color:var(--dim);font-size:.85em;margin-bottom:6px">BOT</div><div class="die1" id="d1b">?</div></div>
-    </div>
+    <div id="dice-row" style="display:flex;gap:32px;align-items:center;flex-wrap:wrap;justify-content:center;"></div>
     <div id="coin-result" style="min-height:28px;font-weight:700;color:var(--gold)"></div>
   </div>
   <div id="version-tag"></div>
@@ -465,7 +461,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v28';
+const GAME_VERSION='v29';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -585,6 +581,7 @@ SPELLTRAP_DB.forEach(c=>DB[c.id]=c);
 let uidc=1;
 const G={
   startHealth:8000,
+  numPlayers:2, // 2-4; seats beyond ME(=0) are bots. Rebuilt by beginDuel() to match.
   health:[8000,8000],
   deck:[],gy:[],
   players:[
@@ -704,6 +701,19 @@ function buildDeck(){
 function log(msg,cls){G.log.push({msg,cls:cls||'sys'});renderLog();}
 function base(card){return DB[card.baseId];}
 function isMonster(card){return base(card).cat==='Monster';}
+function pName(pIdx){ return pIdx===ME ? 'You' : 'Bot '+pIdx; }
+// Next living seat clockwise from `idx` (wraps around); returns idx itself if nobody else is alive.
+function nextAliveSeat(idx){
+  for(let step=1;step<=G.numPlayers;step++){
+    const cand=(idx+step)%G.numPlayers;
+    if(!G.players[cand].eliminated) return cand;
+  }
+  return idx;
+}
+function livingSeats(){
+  const arr=[]; for(let i=0;i<G.numPlayers;i++) if(!G.players[i].eliminated) arr.push(i);
+  return arr;
+}
 
 /* ============================= SETUP FLOW ============================= */
 document.querySelectorAll('.health-btn').forEach(b=>{
@@ -718,45 +728,53 @@ function startCoinFlip(){
   document.getElementById('setup-wrap').style.display='none';
   const wrap=document.getElementById('coin-flip-wrap');
   wrap.style.display='flex';
-  const d1=document.getElementById('d1a'), d2=document.getElementById('d1b');
-  d1.classList.add('spin'); d2.classList.add('spin');
-  let myRoll,botRoll;
-  const spin=setInterval(()=>{d1.textContent=1+Math.floor(Math.random()*6);d2.textContent=1+Math.floor(Math.random()*6);},80);
+  document.getElementById('coin-result').textContent='';
+  const seats=[]; for(let i=0;i<G.numPlayers;i++) seats.push(i);
+  rollForFirst(seats);
+}
+// Rolls 1d6 for each seat in `candidates`; on a tie for the highest roll, re-rolls only the tied seats.
+function rollForFirst(candidates){
+  const row=document.getElementById('dice-row');
+  row.innerHTML=candidates.map(i=>
+    `<div style="text-align:center"><div style="color:var(--dim);font-size:.85em;margin-bottom:6px">${pName(i).toUpperCase()}</div><div class="die1 spin" id="fd-${i}">?</div></div>`
+  ).join('');
+  const dieEls=candidates.map(i=>document.getElementById('fd-'+i));
+  const spin=setInterval(()=>{ dieEls.forEach(el=>{el.textContent=1+Math.floor(Math.random()*6);}); },80);
   setTimeout(()=>{
     clearInterval(spin);
-    d1.classList.remove('spin'); d2.classList.remove('spin');
-    myRoll=1+Math.floor(Math.random()*6); botRoll=1+Math.floor(Math.random()*6);
-    d1.textContent=myRoll; d2.textContent=botRoll;
+    const rolls=candidates.map(()=>1+Math.floor(Math.random()*6));
+    dieEls.forEach((el,i)=>{el.classList.remove('spin'); el.textContent=rolls[i];});
     const res=document.getElementById('coin-result');
-    if(myRoll===botRoll){
+    const maxRoll=Math.max(...rolls);
+    const winners=candidates.filter((seat,i)=>rolls[i]===maxRoll);
+    if(winners.length>1){
       res.textContent="Tie! Rolling again...";
-      setTimeout(startCoinFlip2,1200);
+      setTimeout(()=>rollForFirst(winners),1200);
     } else {
-      G.first = myRoll>botRoll ? ME : BOT;
-      res.textContent = (G.first===ME? "You go first!" : "Bot goes first!");
+      G.first=winners[0];
+      res.textContent = `${pName(G.first)} won the roll — go${G.first===ME?'':'es'} first!`;
       setTimeout(()=>beginDuel(),1300);
     }
   },900);
-}
-function startCoinFlip2(){
-  document.getElementById('coin-result').textContent='';
-  startCoinFlip();
 }
 
 function beginDuel(){
   document.getElementById('start-screen').style.display='none';
   document.getElementById('game-root').style.display='flex';
-  G.health=[G.startHealth,G.startHealth];
+  G.health=Array(G.numPlayers).fill(G.startHealth);
+  G.noBattleDamage=Array(G.numPlayers).fill(false);
+  G.isBot=Array.from({length:G.numPlayers},(_,i)=>i!==ME);
   G.deck=buildDeck();
   G.gy=[];
-  G.players[ME]={hand:[],mon:[null,null,null,null],st:[null,null,null,null],normalSummonUsed:false};
-  G.players[BOT]={hand:[],mon:[null,null,null,null],st:[null,null,null,null],normalSummonUsed:false};
+  G.players=Array.from({length:G.numPlayers},()=>(
+    {hand:[],mon:[null,null,null,null],st:[null,null,null,null],normalSummonUsed:false,fdSummonThisTurn:null,eliminated:false}
+  ));
   // opening hands: 5 each
   for(let i=0;i<5;i++){
-    drawCard(ME,true); drawCard(BOT,true);
+    for(let s=0;s<G.numPlayers;s++) drawCard(s,true);
   }
   G.active=G.first; G.turnNum=1;
-  log(`${G.first===ME?'You':'Bot'} won the roll and go first.`,'sys');
+  log(`${pName(G.first)} won the roll and go${G.first===ME?'':'es'} first.`,'sys');
   startTurn();
 }
 
@@ -769,7 +787,7 @@ function drawCard(pIdx,silent){
   const c=G.deck.pop();
   G.players[pIdx].hand.push(c);
   if(!silent){
-    log(`${pIdx===ME?'You':'Bot'} drew a card. (${G.players[pIdx].hand.length} in hand)`, pIdx===ME?'me':'opp');
+    log(`${pName(pIdx)} drew a card. (${G.players[pIdx].hand.length} in hand)`, pIdx===ME?'me':'opp');
     SFX.draw();
     markJustPlaced(c.uid);
   }
@@ -778,14 +796,28 @@ function drawCard(pIdx,silent){
 
 /* ============================= TURN / PHASE FLOW ============================= */
 const PHASES=['draw','standby','main1','battle','main2','end'];
-function isVeryFirstTurn(){return G.turnNum===1 && G.active===G.first;}
+// True while every seat is still on their very first turn of the game (turns 1..numPlayers).
+function isFirstRound(){ return G.turnNum<=G.numPlayers; }
+// Schoolyard format round-1 rules: in a 2P game only the seat that won the roll skips their turn-1
+// Battle Phase; in a 3-4P game everyone skips turn-1 Battle Phase except the last seat in the initial
+// clockwise turn order (the seat immediately before G.first).
+function skipsBattleFirstTurn(seat){
+  if(!isFirstRound()) return false;
+  if(G.numPlayers===2) return seat===G.first;
+  const lastSeat=(G.first-1+G.numPlayers)%G.numPlayers;
+  return seat!==lastSeat;
+}
+// Only a 2P game's roll-winner skips their turn-1 Draw Phase; 3-4P games draw normally on turn 1.
+function skipsDrawFirstTurn(seat){
+  return isFirstRound() && G.numPlayers===2 && seat===G.first;
+}
 
 function startTurn(){
   const p=G.players[G.active];
   p.normalSummonUsed=false;
   Object.values(p.mon).forEach(m=>{if(m){m.attacked=false;}});
   G.selection=null;
-  flashTurnBanner(G.active===ME?"YOUR TURN":"BOT'S TURN");
+  flashTurnBanner(G.active===ME?"YOUR TURN":pName(G.active).toUpperCase()+"'S TURN");
   SFX.turn();
   goPhase('draw');
 }
@@ -804,7 +836,7 @@ function goPhase(ph){
 }
 function advancePhase(){
   if(G.gameOver) return;
-  const skipBattle = isVeryFirstTurn();
+  const skipBattle = skipsBattleFirstTurn(G.active);
   const order = skipBattle ? ['draw','standby','main1','main2','end'] : PHASES;
   let idx=order.indexOf(G.phase);
   idx++;
@@ -813,15 +845,15 @@ function advancePhase(){
 }
 
 function doDrawPhase(){
-  if(isVeryFirstTurn()){
-    log(`${G.active===ME?'You skip':'Bot skips'} the Draw Phase (going first).`,'sys');
-    setTimeout(advancePhase, G.active===BOT?500:0);
+  if(skipsDrawFirstTurn(G.active)){
+    log(`${pName(G.active)} skip${G.active===ME?'':'s'} the Draw Phase (going first).`,'sys');
+    setTimeout(advancePhase, G.active!==ME?500:0);
     return;
   }
   if(G.active===ME){
     render(); // shows arrow, waits for click on deck
   } else {
-    setTimeout(()=>{ drawCard(BOT); render(); setTimeout(advancePhase,600); },600);
+    setTimeout(()=>{ drawCard(G.active); render(); setTimeout(advancePhase,600); },600);
   }
 }
 function humanDrawClick(){
@@ -916,30 +948,57 @@ function doEndPhase(){
   const p=G.players[G.active];
   Object.values(p.mon).forEach(m=>{if(m) m.tempAtk=0;});
   render();
-  setTimeout(endTurn, G.active===BOT?500:300);
+  setTimeout(endTurn, G.active!==ME?500:300);
 }
 function endTurn(){
   if(G.gameOver) return;
-  G.active = 1-G.active;
+  G.active = nextAliveSeat(G.active);
   G.turnNum++;
   startTurn();
 }
 
-/* ============================= WIN CHECK ============================= */
+/* ============================= WIN CHECK / ELIMINATION ============================= */
+// A player hitting 0 Health is eliminated, not an immediate game-over: their hand and field go to
+// the (shared) Graveyard and they drop out of turn rotation/targeting. This is a state-based sweep,
+// not "destroyed by a card" — it deliberately bypasses sendToGY/banish so it doesn't spuriously
+// re-trigger destruction-reaction effects (Michizure, Wattlemur, Blast with Chain, Witch of the
+// Black Forest, linked Continuous traps). The game itself only ends once <=1 player remains.
+function eliminatePlayer(pIdx){
+  const p=G.players[pIdx];
+  if(p.eliminated) return;
+  p.eliminated=true;
+  log(`${pName(pIdx)}'s Health hit 0 — eliminated! Hand and field sent to the Graveyard.`, pIdx===ME?'me':'opp');
+  p.hand.forEach(c=>{ c.equips=[]; G.gy.push(c); });
+  p.hand=[];
+  p.mon.forEach((c,i)=>{ if(c){ c.equips=[]; G.gy.push(c); p.mon[i]=null; } });
+  p.st.forEach((c,i)=>{ if(c){ G.gy.push(c); p.st[i]=null; } });
+}
 function checkWin(){
-  if(G.health[ME]<=0){ endGame(BOT); return true; }
-  if(G.health[BOT]<=0){ endGame(ME); return true; }
+  let changed=false;
+  for(let i=0;i<G.numPlayers;i++){
+    if(!G.players[i].eliminated && G.health[i]<=0){ eliminatePlayer(i); changed=true; }
+  }
+  const alive=livingSeats();
+  if(alive.length<=1){
+    endGame(alive.length===1?alive[0]:null);
+    return true;
+  }
+  if(changed) render();
   return false;
 }
 function endGame(winner){
   G.gameOver=true;
-  document.getElementById('go-title').textContent = winner===ME? 'Victory!' : 'Defeat...';
-  document.getElementById('go-sub').textContent = winner===ME? 'You reduced the Bot to 0 Health.' : 'Your Health hit 0.';
+  const title = winner===null ? 'Draw' : (winner===ME? 'Victory!' : 'Defeat...');
+  const sub = winner===null ? 'Every remaining player was eliminated at once.'
+    : winner===ME ? 'You are the last one standing.'
+    : `${pName(winner)} is the last one standing.`;
+  document.getElementById('go-title').textContent = title;
+  document.getElementById('go-sub').textContent = sub;
   document.getElementById('gameover-bg').style.display='flex';
-  if(winner===ME) SFX.victory(); else SFX.defeat();
+  if(winner===ME) SFX.victory(); else if(winner!==null) SFX.defeat();
 }
 function dealDamage(pIdx,amount,isBattle){
-  if(amount<=0) return;
+  if(amount<=0 || G.players[pIdx].eliminated) return;
   if(isBattle && G.noBattleDamage[pIdx]){ log(`Kuriboh's shield prevents the Battle Damage.`,'sys'); return; }
   G.health[pIdx]=Math.max(0,G.health[pIdx]-amount);
   floatNumber(pIdx,'-'+amount,'dmg');
@@ -970,13 +1029,13 @@ function sendToGY(pIdx,card,fromZoneType,zoneIdx,reason,destroyerSide){
   if(banished){ log(`${base(card).n} is banished instead of going to the Graveyard.`,'sys'); }
   else G.gy.push(card);
   if(fromZoneType==='st') destroyLinkedContinuous(card.uid);
-  if(reason==='battle' && isMonster(card)) triggerOnDestroyedByBattle(pIdx,card);
+  if(reason==='battle' && isMonster(card)) triggerOnDestroyedByBattle(pIdx,card,destroyerSide);
   if(!banished && isMonster(card)) triggerOnSentToGY(pIdx,card);
   if(!banished && isMonster(card) && base(card).fx==='wattlemur' && (reason==='battle'||reason==='effect')){
-    const ds = reason==='battle' ? (1-pIdx) : destroyerSide;
+    const ds = destroyerSide;
     if(ds!=null && ds!==pIdx){
       G.skipBattle={side:ds,setTurn:G.turnNum};
-      log(`${base(card).n}'s effect activates — ${ds===ME?'you':'Bot'} cannot conduct the Battle Phase next turn!`,'sys');
+      log(`${base(card).n}'s effect activates — ${pName(ds)} cannot conduct the Battle Phase next turn!`,'sys');
     }
   }
 }
@@ -1007,9 +1066,12 @@ function findEmptyZone(pIdx,type){
 }
 
 /* ---- triggers ---- */
-function triggerOnDestroyedByBattle(pIdx,card){
-  // Michizure triggers off "your monster destroyed by battle" for its OWN controller.
-  const opp=1-pIdx;
+function triggerOnDestroyedByBattle(pIdx,card,destroyerSide){
+  // Michizure triggers off "your monster destroyed by battle" for its OWN controller, and (per the
+  // Schoolyard format redirect rule) only ever targets the actual destroyer's monsters, not a free
+  // choice among other opponents.
+  if(destroyerSide==null) return;
+  const opp=destroyerSide;
   G.players[pIdx].st.forEach((c,i)=>{
     if(c && c.faceDown && c.baseId==='michizure'){
       offerTrapActivation(pIdx,i,c,()=>{
@@ -1216,7 +1278,7 @@ function render(){
   document.getElementById('hand-opp').classList.toggle('active-turn',G.active===BOT);
 
   const phaseLabels={draw:'Draw',standby:'Standby',main1:'Main 1',battle:'Battle',main2:'Main 2',end:'End'};
-  document.getElementById('turn-banner').textContent = (G.active===ME?"YOUR TURN":"BOT'S TURN")+` · Turn ${G.turnNum} · ${phaseLabels[G.phase]}`;
+  document.getElementById('turn-banner').textContent = (G.active===ME?"YOUR TURN":pName(G.active).toUpperCase()+"'S TURN")+` · Turn ${G.turnNum} · ${phaseLabels[G.phase]}`;
   const track=document.getElementById('phase-track'); track.innerHTML='';
   PHASES.forEach(ph=>{
     const pip=document.createElement('div'); pip.className='phase-pip'+(G.phase===ph?' active':'');
@@ -1233,7 +1295,7 @@ function render(){
   const deckPile=document.getElementById('pile-deck');
   const existingArrow=deckPile.querySelector('.draw-arrow');
   if(existingArrow) existingArrow.remove();
-  if(G.phase==='draw' && G.active===ME && !isVeryFirstTurn()){
+  if(G.phase==='draw' && G.active===ME && !skipsDrawFirstTurn(ME)){
     const ar=document.createElement('div'); ar.className='draw-arrow'; ar.textContent='▼';
     deckPile.appendChild(ar);
   }
@@ -1266,7 +1328,7 @@ function renderActionButtons(){
   if(G.active!==ME || G.gameOver) return;
   if(G.phase==='main1'||G.phase==='main2'){
     const toBattle=document.createElement('button'); toBattle.className='abtn primary';
-    toBattle.textContent = G.phase==='main1' ? (isVeryFirstTurn()? 'Go to Main 2 ▶':'Go to Battle Phase ▶') : 'End Turn ▶';
+    toBattle.textContent = G.phase==='main1' ? (skipsBattleFirstTurn(ME)? 'Go to Main 2 ▶':'Go to Battle Phase ▶') : 'End Turn ▶';
     toBattle.onclick=()=>{ if(G.selection){G.selection=null; render();} advancePhase(); };
     el.appendChild(toBattle);
   }
@@ -1915,25 +1977,25 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
     if(aAtk>dAtk){
       const dmg=aAtk-dAtk;
       const blocked=G.waboku===defenderSide||G.noBattleDamage[defenderSide];
-      protectedDestroy(defenderSide,defender,targetIdx);
+      protectedDestroy(defenderSide,defender,targetIdx,attackerSide);
       if(G.waboku!==defenderSide) dealDamage(defenderSide,dmg,true);
       log(`${base(attacker).n} destroys ${base(defender).n}! ${blocked?0:dmg} damage.`,attackerSide===ME?'me':'opp');
       grantExtraAttackIfEligible(attacker);
     } else if(aAtk<dAtk){
       const dmg=dAtk-aAtk;
       const blocked=G.noBattleDamage[attackerSide];
-      protectedDestroy(attackerSide,attacker,atkIdx);
+      protectedDestroy(attackerSide,attacker,atkIdx,defenderSide);
       dealDamage(attackerSide,dmg,true);
       log(`${base(defender).n} destroys ${base(attacker).n}! ${blocked?0:dmg} damage.`,attackerSide===ME?'me':'opp');
     } else {
-      protectedDestroy(attackerSide,attacker,atkIdx);
-      protectedDestroy(defenderSide,defender,targetIdx);
+      protectedDestroy(attackerSide,attacker,atkIdx,defenderSide);
+      protectedDestroy(defenderSide,defender,targetIdx,attackerSide);
       log(`Both monsters destroy each other!`,'sys');
     }
   } else {
     const dDef=effDef(defender);
     if(aAtk>dDef){
-      protectedDestroy(defenderSide,defender,targetIdx);
+      protectedDestroy(defenderSide,defender,targetIdx,attackerSide);
       log(`${base(attacker).n} destroys ${base(defender).n} (Defense Position). No Battle Damage.`,attackerSide===ME?'me':'opp');
       grantExtraAttackIfEligible(attacker);
     } else if(aAtk<dDef){
@@ -1947,9 +2009,9 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
   }
   render();
 }
-function protectedDestroy(side,card,idx){
+function protectedDestroy(side,card,idx,destroyerSide){
   if(G.waboku===side){ log(`Waboku protects ${base(card).n} from destruction.`, side===ME?'me':'opp'); return; }
-  sendToGY(side,card,'mon',idx,'battle');
+  sendToGY(side,card,'mon',idx,'battle',destroyerSide);
 }
 
 /* ============================= SPELL/TRAP EFFECT RESOLUTION ============================= */
@@ -2426,20 +2488,20 @@ function botAttackStep(fromIdx){
 /* ============================= END PHASE CLEANUP ============================= */
 const origDoEndPhase=doEndPhase;
 doEndPhase=function(){
-  [ME,BOT].forEach(s=>{
+  for(let s=0;s<G.numPlayers;s++){
     G.players[s].mon.forEach(m=>{ if(m){ if(m.reverseGlasses) m.reverseGlasses=false; if(m.unaffectedByEffects) m.unaffectedByEffects=false; if(m.tempEndPhaseReturn){ const t=m.tempEndPhaseReturn; const zi=G.players[s].mon.indexOf(m); G.players[s].mon[zi]=null; m.controller=t.owner; m.zone=t.ownIdx; if(!G.players[t.owner].mon[t.ownIdx]) G.players[t.owner].mon[t.ownIdx]=m; delete m.tempEndPhaseReturn; } } });
-  });
+  }
   G.waboku=null;
-  G.noBattleDamage=[false,false];
+  G.noBattleDamage=Array(G.numPlayers).fill(false);
   if(G.skipDraw!==undefined && G.skipDraw!==null){ /* handled in doDrawPhase via consumption below */ }
   origDoEndPhase();
 };
 const origDoDrawPhase=doDrawPhase;
 doDrawPhase=function(){
-  if(!isVeryFirstTurn() && G.skipDraw===G.active){
-    log(`${G.active===ME?'You':'Bot'} skip the Draw Phase (Time Seal).`,'sys');
+  if(!skipsDrawFirstTurn(G.active) && G.skipDraw===G.active){
+    log(`${pName(G.active)} skip${G.active===ME?'':'s'} the Draw Phase (Time Seal).`,'sys');
     G.skipDraw=null;
-    setTimeout(advancePhase, G.active===BOT?500:0);
+    setTimeout(advancePhase, G.active!==ME?500:0);
     return;
   }
   origDoDrawPhase();
@@ -2447,9 +2509,9 @@ doDrawPhase=function(){
 const origDoBattlePhase=doBattlePhase;
 doBattlePhase=function(){
   if(G.skipBattle && G.skipBattle.side===G.active && G.skipBattle.setTurn<G.turnNum){
-    log(`${G.active===ME?'You':'Bot'} cannot conduct the Battle Phase this turn (Wattlemur).`,'sys');
+    log(`${pName(G.active)} cannot conduct the Battle Phase this turn (Wattlemur).`,'sys');
     G.skipBattle=null;
-    setTimeout(advancePhase, G.active===BOT?500:0);
+    setTimeout(advancePhase, G.active!==ME?500:0);
     return;
   }
   origDoBattlePhase();
