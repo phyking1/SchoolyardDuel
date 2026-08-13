@@ -465,7 +465,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v27';
+const GAME_VERSION='v28';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -514,7 +514,7 @@ M("Turtle Tiger","WATER","Aqua",4,1000,1500,"Effect","turtle_tiger","Once per tu
 M("Homunculus the Alchemic Being","EARTH","Fiend",4,1800,1600,"Effect","homunculus","Once per turn: you can pay 500 Health; this card gains 500 ATK until the End Phase.","⚗️"),
 M("Kuriboh","DARK","Fiend",1,300,200,"Effect","kuriboh","You can discard this card to negate all Battle Damage you would take this turn.","🐹"),
 M("Old Vindictive Magician","DARK","Spellcaster",2,450,600,"Flip","old_vindictive_magician","FLIP: Destroy 1 monster your opponent controls with 1500 or less ATK.","🧙"),
-M("Wattlemur","WATER","Aqua",3,1000,1000,"Normal",null,"A small aquatic creature with an oversized wattle.","🐸"),
+M("Wattlemur","LIGHT","Thunder",2,800,100,"Effect","wattlemur","If this card in its owner's possession is destroyed by your opponent's card (either by battle or by card effect): Your opponent cannot conduct their Battle Phase during their next turn.","🐒"),
 M("The Cuckoo Commanded to Croon","WIND","Winged Beast",3,800,1000,"Normal",null,"This bird sings only when ordered to.","🐦"),
 M("Princess of Tsurugi","EARTH","Spellcaster",3,900,700,"Effect","princess_of_tsurugi","Whenever your opponent Normal or Flip Summons a monster: inflict 500 damage to them.","👸"),
 M("Oppressed People","EARTH","Fiend",1,400,2000,"Flip","oppressed_people","FLIP: Add 1 monster with 1000 or less ATK from your Deck to your hand.","😔"),
@@ -595,6 +595,7 @@ const G={
   phase:'draw',
   attrMod:null, // {a:'FIRE',delta:+600}
   noBattleDamage:[false,false], // Kuriboh shield, per player, cleared at End Phase
+  skipBattle:null, // {side,setTurn} Wattlemur — that side skips their next Battle Phase
   selection:null, // ui selection state
   gameOver:false,
   isBot:[false,true],
@@ -954,7 +955,7 @@ function gainHealth(pIdx,amount){
 }
 
 /* ============================= CARD MOVEMENT HELPERS ============================= */
-function sendToGY(pIdx,card,fromZoneType,zoneIdx,reason){
+function sendToGY(pIdx,card,fromZoneType,zoneIdx,reason,destroyerSide){
   if(fromZoneType==='mon'||fromZoneType==='st') playDestroyClone(pIdx,fromZoneType,zoneIdx);
   const p=G.players[pIdx];
   if(fromZoneType==='mon') p.mon[zoneIdx]=null;
@@ -971,6 +972,13 @@ function sendToGY(pIdx,card,fromZoneType,zoneIdx,reason){
   if(fromZoneType==='st') destroyLinkedContinuous(card.uid);
   if(reason==='battle' && isMonster(card)) triggerOnDestroyedByBattle(pIdx,card);
   if(!banished && isMonster(card)) triggerOnSentToGY(pIdx,card);
+  if(!banished && isMonster(card) && base(card).fx==='wattlemur' && (reason==='battle'||reason==='effect')){
+    const ds = reason==='battle' ? (1-pIdx) : destroyerSide;
+    if(ds!=null && ds!==pIdx){
+      G.skipBattle={side:ds,setTurn:G.turnNum};
+      log(`${base(card).n}'s effect activates — ${ds===ME?'you':'Bot'} cannot conduct the Battle Phase next turn!`,'sys');
+    }
+  }
 }
 function destroyLinkedContinuous(trapUid){
   [ME,BOT].forEach(s=>{
@@ -1018,7 +1026,7 @@ function triggerOnDestroyedByBattle(pIdx,card){
           const trapEl=zoneCardEl(pIdx,'st',i), targetEl=zoneCardEl(opp,'mon',zi);
           const finish=()=>{
             log(`Michizure destroys ${base(t).n}.`, pIdx===ME?'me':'opp');
-            sendToGY(opp,t,'mon',zi,'effect');
+            sendToGY(opp,t,'mon',zi,'effect',pIdx);
             sendToGY(pIdx,c,'st',i,'effect');
             render();
           };
@@ -1594,9 +1602,9 @@ function afterSummon(pIdx,card,idx){
     if(targets.length){
       if(pIdx===ME){
         showModal('Hunter Dragon','Destroy a face-up Defense Position monster?',
-          targets.map(i=>({label:base(G.players[opp].mon[i]).n,action:()=>{ log(`Hunter Dragon destroys ${base(G.players[opp].mon[i]).n}.`,'me'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect'); render();}})).concat([{label:'Skip',action:()=>{}}]));
+          targets.map(i=>({label:base(G.players[opp].mon[i]).n,action:()=>{ log(`Hunter Dragon destroys ${base(G.players[opp].mon[i]).n}.`,'me'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect',pIdx); render();}})).concat([{label:'Skip',action:()=>{}}]));
       } else {
-        const i=targets[0]; log(`Bot's Hunter Dragon destroys ${base(G.players[opp].mon[i]).n}.`,'opp'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect'); render();
+        const i=targets[0]; log(`Bot's Hunter Dragon destroys ${base(G.players[opp].mon[i]).n}.`,'opp'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect',pIdx); render();
       }
     }
   }
@@ -1645,9 +1653,9 @@ function resolveSummonTrap(defenderIdx,trapIdx,trapCard,fx,summonerIdx,summonedC
   const finish=()=>{
     if(fx==='trap_hole'){
       log(`Trap Hole destroys ${base(summonedCard).n}.`, defenderIdx===ME?'me':'opp');
-      sendToGY(summonerIdx,summonedCard,'mon',summonedIdx,'effect');
+      sendToGY(summonerIdx,summonedCard,'mon',summonedIdx,'effect',defenderIdx);
     } else if(fx==='torrential_tribute'){
-      [ME,BOT].forEach(s=>{ G.players[s].mon.forEach((m,i)=>{ if(m) sendToGY(s,m,'mon',i,'effect'); }); });
+      [ME,BOT].forEach(s=>{ G.players[s].mon.forEach((m,i)=>{ if(m) sendToGY(s,m,'mon',i,'effect',defenderIdx); }); });
       log('Torrential Tribute destroys all monsters on the field.','sys');
     } else if(fx==='floodgate_trap_hole'){
       if(G.players[summonerIdx].mon[summonedIdx]===summonedCard){
@@ -1656,7 +1664,7 @@ function resolveSummonTrap(defenderIdx,trapIdx,trapCard,fx,summonerIdx,summonedC
       }
     } else if(fx==='horn_of_heaven'){
       log(`Horn of Heaven negates the Special Summon and destroys ${base(summonedCard).n}!`, defenderIdx===ME?'me':'opp');
-      sendToGY(summonerIdx,summonedCard,'mon',summonedIdx,'effect');
+      sendToGY(summonerIdx,summonedCard,'mon',summonedIdx,'effect',defenderIdx);
     }
     G.gy.push(trapCard); G.players[defenderIdx].st[trapIdx]=null;
     render();
@@ -1740,7 +1748,7 @@ function getActivatableMonsterEffect(card,pIdx,zoneIdx){
         const zi=targets[Math.floor(Math.random()*targets.length)];
         const t=G.players[opp].mon[zi];
         log(`${b.n} destroys ${base(t).n}!`,pIdx===ME?'me':'opp');
-        sendToGY(opp,t,'mon',zi,'effect');
+        sendToGY(opp,t,'mon',zi,'effect',pIdx);
       }
       render();
     }};
@@ -1781,7 +1789,7 @@ function triggerFlip(pIdx,card,idx){
   else if(fx==='old_vindictive_magician'){
     const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && effAtk(m)<=1500 && !m.unaffectedByEffects) targets.push(i); });
     if(targets.length){
-      const doIt=(i)=>{ log(`Old Vindictive Magician destroys ${base(G.players[opp].mon[i]).n}.`,pIdx===ME?'me':'opp'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect'); render(); };
+      const doIt=(i)=>{ log(`Old Vindictive Magician destroys ${base(G.players[opp].mon[i]).n}.`,pIdx===ME?'me':'opp'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect',pIdx); render(); };
       if(pIdx===ME) showModal('Old Vindictive Magician','Destroy a monster with 1500 or less ATK?', targets.map(i=>({label:base(G.players[opp].mon[i]).n,action:()=>doIt(i)})).concat([{label:'Skip',action:()=>{}}]));
       else doIt(targets[0]);
     }
@@ -1790,7 +1798,7 @@ function triggerFlip(pIdx,card,idx){
   else if(fx==='silver_fang'){
     if(Math.random()<0.5){
       const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown && m.pos==='def' && effDef(m)<=effAtk(card) && !m.unaffectedByEffects) targets.push(i); });
-      if(targets.length){ const i=targets[0]; log(`Silver Fang flips heads and destroys ${base(G.players[opp].mon[i]).n}.`,pIdx===ME?'me':'opp'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect'); render(); }
+      if(targets.length){ const i=targets[0]; log(`Silver Fang flips heads and destroys ${base(G.players[opp].mon[i]).n}.`,pIdx===ME?'me':'opp'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect',pIdx); render(); }
       else log('Silver Fang flips heads but had no valid target.','sys');
     } else log('Silver Fang flips tails — no effect.','sys');
   }
@@ -1868,7 +1876,7 @@ function resolveTrapVsAttack(fx,attackerSide,defenderSide,attacker,atkIdx,target
   else if(fx==='waboku'){ G.waboku=defenderSide; log(`Waboku will prevent battle damage and destruction this turn.`, defenderSide===ME?'me':'opp'); trapToGY(); cb(false); }
   else if(fx==='solemn_judgment'){
     G.health[defenderSide]=Math.floor(G.health[defenderSide]/2);
-    sendToGY(attackerSide,attacker,'mon',atkIdx,'effect');
+    sendToGY(attackerSide,attacker,'mon',atkIdx,'effect',defenderSide);
     log(`Solemn Judgment negates the attack and destroys ${base(attacker).n}! Half Health paid.`, defenderSide===ME?'me':'opp');
     trapToGY();
     cb(true);
@@ -1968,13 +1976,13 @@ function resolveSpellTrapEffect(pIdx,card,idx){
     case 'raigeki': {
       const srcEl=zoneCardEl(pIdx,'st',idx);
       const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m) targets.push(zoneCardEl(opp,'mon',i)); });
-      playBeamThenRun(srcEl,targets,()=>{ G.players[opp].mon.forEach((m,i)=>{ if(m) sendToGY(opp,m,'mon',i,'effect'); }); render(); });
+      playBeamThenRun(srcEl,targets,()=>{ G.players[opp].mon.forEach((m,i)=>{ if(m) sendToGY(opp,m,'mon',i,'effect',pIdx); }); render(); });
       toGYSelf(); break;
     }
     case 'dark_hole': {
       const srcEl=zoneCardEl(pIdx,'st',idx);
       const targets=[]; [ME,BOT].forEach(s=>{ G.players[s].mon.forEach((m,i)=>{ if(m) targets.push(zoneCardEl(s,'mon',i)); }); });
-      playBeamThenRun(srcEl,targets,()=>{ [ME,BOT].forEach(s=>{ G.players[s].mon.forEach((m,i)=>{ if(m) sendToGY(s,m,'mon',i,'effect'); }); }); render(); });
+      playBeamThenRun(srcEl,targets,()=>{ [ME,BOT].forEach(s=>{ G.players[s].mon.forEach((m,i)=>{ if(m) sendToGY(s,m,'mon',i,'effect',pIdx); }); }); render(); });
       toGYSelf(); break;
     }
     case 'feather_duster': {
@@ -1994,7 +2002,7 @@ function resolveSpellTrapEffect(pIdx,card,idx){
       let low=null; G.players[opp].mon.forEach((m,i)=>{ if(m && (!low||effAtk(m)<effAtk(G.players[opp].mon[low]))) low=i; });
       if(low!==null){
         const srcEl=zoneCardEl(pIdx,'st',idx), targetEl=zoneCardEl(opp,'mon',low);
-        playBeamThenRun(srcEl,[targetEl],()=>{ sendToGY(opp,G.players[opp].mon[low],'mon',low,'effect'); render(); });
+        playBeamThenRun(srcEl,[targetEl],()=>{ sendToGY(opp,G.players[opp].mon[low],'mon',low,'effect',pIdx); render(); });
         log(`Fissure destroys ${base(card).n?'':''}`,'sys');
       }
       toGYSelf(); break;
@@ -2435,6 +2443,16 @@ doDrawPhase=function(){
     return;
   }
   origDoDrawPhase();
+};
+const origDoBattlePhase=doBattlePhase;
+doBattlePhase=function(){
+  if(G.skipBattle && G.skipBattle.side===G.active && G.skipBattle.setTurn<G.turnNum){
+    log(`${G.active===ME?'You':'Bot'} cannot conduct the Battle Phase this turn (Wattlemur).`,'sys');
+    G.skipBattle=null;
+    setTimeout(advancePhase, G.active===BOT?500:0);
+    return;
+  }
+  origDoBattlePhase();
 };
 
 </script>
