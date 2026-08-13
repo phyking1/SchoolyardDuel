@@ -57,7 +57,9 @@ button{font-family:inherit;cursor:pointer;}
   #030304;
   flex-direction:column;align-items:stretch;
   justify-content:center;justify-content:safe center;}
+#game-root.table-mode{justify-content:flex-start;}
 #board-wrap{position:relative;display:flex;margin:auto 0;}
+#board-wrap.table-mode{margin:0;flex:1 1 auto;min-height:0;}
 #board{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;
   padding:4px 6px;gap:clamp(2px,.8vw,8px);min-width:0;}
 
@@ -129,14 +131,14 @@ button{font-family:inherit;cursor:pointer;}
 #board.table-mode #opp-stack,#board.table-mode #mon-me,#board.table-mode #st-me,
 #board.table-mode #hand-me{display:none;}
 #board-wrap.table-mode #hp-rail-me{display:none;}
-#table-view-top{height:clamp(150px,28vh,215px);}
-#table-view-bottom{height:clamp(150px,28vh,215px);}
-#table-scroll-top,#table-scroll-bottom{display:flex;overflow-x:auto;scroll-snap-type:x proximity;
-  height:100%;-webkit-overflow-scrolling:touch;scrollbar-width:none;gap:10px;padding:0 7%;}
+#board.table-mode{touch-action:pan-y;justify-content:flex-start;padding-bottom:38px;}
+#table-view-top,#table-view-bottom{flex:1 1 0;min-height:150px;overflow:hidden;}
+#table-scroll-top,#table-scroll-bottom{display:flex;overflow-x:hidden;touch-action:none;
+  height:100%;scrollbar-width:none;gap:10px;padding:0 7%;}
 #table-scroll-top::-webkit-scrollbar,#table-scroll-bottom::-webkit-scrollbar{display:none;}
-.table-scene{flex:0 0 86%;scroll-snap-align:center;box-sizing:border-box;
+.table-scene{flex:0 0 86%;box-sizing:border-box;min-height:0;
   display:flex;align-items:stretch;justify-content:center;height:100%;}
-.table-scene .opp-panel{width:100%;max-width:340px;}
+.table-scene .opp-panel{width:100%;max-width:340px;min-height:0;overflow:hidden;justify-content:center;}
 .table-scene:empty{display:none;}
 
 .hand-row{display:flex;justify-content:center;gap:clamp(3px,1.2vw,6px);flex:0 0 auto;padding:4px 0;
@@ -526,7 +528,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v35';
+const GAME_VERSION='v36';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -870,16 +872,20 @@ function buildTableView(){
   const buildPanel=(name,idSuffix,seat,isMine)=>{
     const panel=document.createElement('div');
     panel.className='opp-panel table-slot'; if(seat!=null) panel.dataset.seat=seat; panel.id='table-panel-'+idSuffix;
-    panel.innerHTML=
+    const header=
       `<div class="opp-panel-header">`+
         `<div class="opp-panel-name">${name}</div>`+
         `<div class="opp-hp-bar-wrap"><div class="opp-hp-bar" id="hb-${idSuffix}"></div></div>`+
         `<div class="opp-hp-num" id="hn-${idSuffix}">${G.startHealth}</div>`+
         `<div class="opp-hand-count" id="handcount-${idSuffix}">H:0</div>`+
-      `</div>`+
-      `<div class="hand-row${isMine?'':' opp'}" id="hand-${idSuffix}"></div>`+
-      `<div class="zone-row" id="st-${idSuffix}"></div>`+
-      `<div class="zone-row" id="mon-${idSuffix}"></div>`;
+      `</div>`;
+    const hand=`<div class="hand-row compact${isMine?'':' opp'}" id="hand-${idSuffix}"></div>`;
+    const st=`<div class="zone-row compact" id="st-${idSuffix}"></div>`;
+    const mon=`<div class="zone-row compact" id="mon-${idSuffix}"></div>`;
+    // Your own panel reads top-to-bottom as monsters/spells (nearest the center of the table) then
+    // your hand (nearest you, at the bottom) -- matching the normal board. Opponent panels read the
+    // opposite way: their hand near the far edge, their monsters nearest the center.
+    panel.innerHTML = header + (isMine ? mon+st+hand : hand+st+mon);
     return panel;
   };
 
@@ -901,6 +907,7 @@ function buildTableView(){
 }
 function switchViewMode(mode){
   G.viewMode=mode;
+  document.getElementById('game-root').classList.toggle('table-mode', mode==='table');
   document.getElementById('board').classList.toggle('table-mode', mode==='table');
   document.getElementById('board-wrap').classList.toggle('table-mode', mode==='table');
   document.getElementById('view-toggle-btn').textContent = mode==='table' ? '📋 List View' : '🗺️ Table View';
@@ -2691,16 +2698,43 @@ document.getElementById('decklist-btn').addEventListener('click',()=>{
 document.getElementById('view-toggle-btn').addEventListener('click',()=>{
   switchViewMode(G.viewMode==='table' ? 'list' : 'table');
 });
-// The top strip (whoever faces you / your neighbor) and bottom strip (you / your neighbor) must
-// pan together as one continuous board -- whichever one the user actually swipes drives the other
-// to match, by mirroring raw scroll position (both strips use identical panel widths/gaps).
-function syncTableScroll(sourceId,targetId){
-  const source=document.getElementById(sourceId), target=document.getElementById(targetId);
-  if(!source||!target) return;
-  if(Math.abs(target.scrollLeft-source.scrollLeft)>2) target.scrollLeft=source.scrollLeft;
+// Table View is one continuous board you drag anywhere on the screen to pan -- not just within the
+// top or bottom strip individually. A single pointer-drag handler on #board drives both strips'
+// scrollLeft together in real time (their native scrolling is disabled -- see touch-action:none),
+// so a drag starting over a card, the turn banner, or empty space all pan the same way.
+let tablePanDrag=null, tableJustDragged=false;
+function tablePanApply(x){
+  if(!tablePanDrag) return;
+  const dx=x-tablePanDrag.startX;
+  if(!tablePanDrag.dragging && Math.abs(dx)>6) tablePanDrag.dragging=true;
+  if(!tablePanDrag.dragging) return;
+  const st=document.getElementById('table-scroll-top'), sb=document.getElementById('table-scroll-bottom');
+  const maxTop=Math.max(0,st.scrollWidth-st.clientWidth), maxBottom=Math.max(0,sb.scrollWidth-sb.clientWidth);
+  const target=Math.max(0,Math.min(Math.max(maxTop,maxBottom),tablePanDrag.startScroll-dx));
+  st.scrollLeft=Math.min(target,maxTop);
+  sb.scrollLeft=Math.min(target,maxBottom);
 }
-document.getElementById('table-scroll-top').addEventListener('scroll',()=>syncTableScroll('table-scroll-top','table-scroll-bottom'));
-document.getElementById('table-scroll-bottom').addEventListener('scroll',()=>syncTableScroll('table-scroll-bottom','table-scroll-top'));
+document.getElementById('board').addEventListener('pointerdown',(e)=>{
+  if(G.viewMode!=='table') return;
+  tablePanDrag={startX:e.clientX,startScroll:document.getElementById('table-scroll-bottom').scrollLeft,dragging:false};
+});
+document.getElementById('board').addEventListener('pointermove',(e)=>{ if(tablePanDrag) tablePanApply(e.clientX); });
+document.addEventListener('pointerup',()=>{
+  if(tablePanDrag && tablePanDrag.dragging){
+    tableJustDragged=true;
+    // Not every input fires a trailing 'click' after a drag with real movement (observed with
+    // mouse-drag in headless Chromium) -- self-clear so a stale flag can't swallow some later,
+    // unrelated tap. The click listener below still clears it immediately in the normal case.
+    setTimeout(()=>{ tableJustDragged=false; },350);
+  }
+  tablePanDrag=null;
+});
+document.addEventListener('pointercancel',()=>{ tablePanDrag=null; });
+// Swallow the click that a real pointer/touch device fires right after a drag release, so panning
+// never accidentally activates a card or zone underneath the finger.
+document.getElementById('board').addEventListener('click',(e)=>{
+  if(tableJustDragged){ tableJustDragged=false; e.stopPropagation(); e.preventDefault(); }
+},true);
 
 /* ============================= BOT AI ============================= */
 function botMainPhase(){
