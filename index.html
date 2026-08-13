@@ -465,7 +465,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v25';
+const GAME_VERSION='v26';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1723,6 +1723,25 @@ function getActivatableMonsterEffect(card,pIdx,zoneIdx){
       card.tempAtk=(card.tempAtk||0)-half;
       card.unaffectedByEffects=true;
       log(`${pIdx===ME?'You':'Bot'} halves ${b.n}'s ATK — it becomes unaffected by other monsters' effects!`,pIdx===ME?'me':'opp');
+      render();
+    }};
+  }
+  if(b.fx==='time_wizard'){
+    const opp=1-pIdx;
+    const hasTarget=G.players[opp].mon.some(m=>m && !m.unaffectedByEffects);
+    if(!hasTarget) return null;
+    return {label:'Flip Coins: Destroy Monsters',activate:()=>{
+      let heads=0;
+      for(let i=0;i<2;i++){ if(Math.random()<0.5) heads++; }
+      log(`${pIdx===ME?'You flip':'Bot flips'} ${heads} Heads with ${b.n}!`,pIdx===ME?'me':'opp');
+      for(let i=0;i<heads;i++){
+        const targets=[]; G.players[opp].mon.forEach((m,zi)=>{ if(m && !m.unaffectedByEffects) targets.push(zi); });
+        if(!targets.length) break;
+        const zi=targets[Math.floor(Math.random()*targets.length)];
+        const t=G.players[opp].mon[zi];
+        log(`${b.n} destroys ${base(t).n}!`,pIdx===ME?'me':'opp');
+        sendToGY(opp,t,'mon',zi,'effect');
+      }
       render();
     }};
   }
