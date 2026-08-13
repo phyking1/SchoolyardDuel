@@ -465,7 +465,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v22';
+const GAME_VERSION='v23';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -830,6 +830,21 @@ function humanDrawClick(){
 }
 
 function doStandbyPhase(){
+  G.gy.forEach(c=>{
+    if(isMonster(c) && base(c).fx==='spirit_of_the_fall_wind' && c.controller===G.active){
+      gainHealth(G.active,500);
+      log(`Spirit of the Fall Wind grants 500 Health from the Graveyard.`, G.active===ME?'me':'opp');
+    }
+  });
+  [ME,BOT].forEach(s=>{
+    const be=G.players[s].mon.find(m=>m && !m.faceDown && base(m).fx==='big_eye');
+    if(be && s===ME && G.deck.length){
+      showModal('Big Eye','Look at the top card of the Deck?',[
+        {label:'View', action:()=>showCardPopup(previewInstance(base(G.deck[G.deck.length-1])),false)},
+        {label:'Skip', action:()=>{}},
+      ]);
+    }
+  });
   rollDice(()=>{ setTimeout(advancePhase, G.active===BOT?700:900); });
 }
 function rollDice(cb){
@@ -867,6 +882,7 @@ function effAtk(card){
   const b=base(card);
   let atk=b.atk + (card.tempAtk||0);
   card.equips.forEach(eq=>{ if(eq==='amulet_of_ambition'||eq==='horn_of_unicorn') atk+=700; if(eq==='axe_of_fools') atk+=1000; });
+  if(b.fx==='united_resistance') atk+=300*G.gy.filter(c=>isMonster(c)&&base(c).typ==='Warrior').length;
   if(G.attrMod && b.a===G.attrMod.a) atk+=G.attrMod.delta;
   if(atk<0) atk=0;
   return atk;
@@ -942,14 +958,31 @@ function sendToGY(pIdx,card,fromZoneType,zoneIdx,reason){
     p.st.forEach((c,i)=>{ if(c && !c.faceDown && c.equippedSide===pIdx && c.equippedIdx===zoneIdx){ G.gy.push(c); p.st[i]=null; } });
   }
   card.equips=[];
-  G.gy.push(card);
+  const banished=fromZoneType==='mon' && card.banishOnLeave;
+  if(banished){ log(`${base(card).n} is banished instead of going to the Graveyard.`,'sys'); }
+  else G.gy.push(card);
+  if(fromZoneType==='st') destroyLinkedContinuous(card.uid);
   if(reason==='battle' && isMonster(card)) triggerOnDestroyedByBattle(pIdx,card);
-  if(isMonster(card)) triggerOnSentToGY(pIdx,card);
+  if(!banished && isMonster(card)) triggerOnSentToGY(pIdx,card);
+}
+function destroyLinkedContinuous(trapUid){
+  [ME,BOT].forEach(s=>{
+    G.players[s].mon.forEach((m,i)=>{
+      if(m && m.linkedContinuous===trapUid){
+        log(`${base(m).n} is destroyed as its linked Trap left the field.`,'sys');
+        sendToGY(s,m,'mon',i,'effect');
+      }
+    });
+  });
 }
 function banish(pIdx,card,fromZoneType,zoneIdx){
+  if(fromZoneType==='mon'||fromZoneType==='st') playDestroyClone(pIdx,fromZoneType,zoneIdx);
   const p=G.players[pIdx];
   if(fromZoneType==='mon') p.mon[zoneIdx]=null;
-  else if(fromZoneType==='st') p.st[zoneIdx]=null;
+  else if(fromZoneType==='st'){ p.st[zoneIdx]=null; destroyLinkedContinuous(card.uid); }
+  if(fromZoneType==='mon' && isMonster(card)){
+    p.st.forEach((c,i)=>{ if(c && !c.faceDown && c.equippedSide===pIdx && c.equippedIdx===zoneIdx){ G.gy.push(c); p.st[i]=null; } });
+  }
   // banished cards are simply removed from the game (not tracked further)
 }
 function findEmptyZone(pIdx,type){
@@ -960,26 +993,26 @@ function findEmptyZone(pIdx,type){
 
 /* ---- triggers ---- */
 function triggerOnDestroyedByBattle(pIdx,card){
-  // Michizure: controlled by the OTHER player
+  // Michizure triggers off "your monster destroyed by battle" for its OWN controller.
   const opp=1-pIdx;
-  const oppP=G.players[opp];
-  oppP.st.forEach((c,i)=>{
-    if(c && !c.faceDown && c.baseId==='michizure'){} // continuous check not needed (set trap only)
-  });
-  // Set traps that are face-down get an activation window handled by openTrapWindow elsewhere for attacks;
-  // Michizure specifically triggers off "your monster destroyed by battle" for its OWN controller.
   G.players[pIdx].st.forEach((c,i)=>{
     if(c && c.faceDown && c.baseId==='michizure'){
       offerTrapActivation(pIdx,i,c,()=>{
         const targets=[];
         G.players[opp].mon.forEach((m,zi)=>{ if(m && base(m).l>=base(card).l) targets.push(zi); });
-        if(targets.length===0){ log("Michizure had no valid target.","sys"); return; }
+        if(targets.length===0){
+          log("Michizure had no valid target.","sys");
+          sendToGY(pIdx,c,'st',i,'effect');
+          render();
+          return;
+        }
         chooseOrAuto(pIdx,targets,(zi)=>{
           const t=G.players[opp].mon[zi];
           const trapEl=zoneCardEl(pIdx,'st',i), targetEl=zoneCardEl(opp,'mon',zi);
           const finish=()=>{
             log(`Michizure destroys ${base(t).n}.`, pIdx===ME?'me':'opp');
             sendToGY(opp,t,'mon',zi,'effect');
+            sendToGY(pIdx,c,'st',i,'effect');
             render();
           };
           if(trapEl && targetEl){ playBeam(trapEl,targetEl,'trap'); setTimeout(finish,320); }
@@ -1408,15 +1441,15 @@ function onZoneCardClick(pIdx,type,idx){
     const card=G.players[ME].st[idx];
     if(!card||!card.faceDown) return;
     const b=base(card);
-    if(b.cat==='Trap' && b.sub==='Counter'){ toast('Counter Traps can only be activated in response to something.'); return; }
+    if(b.cat==='Trap' && (b.sub==='Counter' || RESPONSE_ONLY_TRAP_FX.has(b.fx))){ toast('This Trap can only be activated in response to something.'); return; }
     if(b.cat==='Spell'){
       showModal(b.n,'Activate this Spell Card?',[
-        {label:'Activate',action:()=>activateFromField(ME,idx)},
+        {label:'Activate',action:()=>activateFromField(ME,idx,()=>offerDarkBribeResponse(ME,card,idx,()=>resolveSpellTrapEffect(ME,card,idx)))},
         {label:'Cancel',action:()=>{}},
       ]);
     } else {
       showModal(b.n,'Activate this Trap Card?',[
-        {label:'Activate',action:()=>activateFromField(ME,idx)},
+        {label:'Activate',action:()=>activateFromField(ME,idx,()=>offerDarkBribeResponse(ME,card,idx,()=>resolveSpellTrapEffect(ME,card,idx)))},
         {label:'Cancel',action:()=>{}},
       ]);
     }
@@ -1446,8 +1479,40 @@ function placeSpell(card,idx,activate){
   G.players[ME].st[idx]=card;
   G.selection=null;
   markJustPlaced(card.uid);
-  if(activate){ log(`You activated ${base(card).n}.`,'me'); SFX.activate(); render(); resolveSpellTrapEffect(ME,card,idx); }
+  if(activate){ log(`You activated ${base(card).n}.`,'me'); SFX.activate(); render(); offerDarkBribeResponse(ME,card,idx,()=>resolveSpellTrapEffect(ME,card,idx)); }
   else { log(`You Set a Spell/Trap.`,'me'); SFX.place(); render(); }
+}
+function offerDarkBribeResponse(activatorSide,card,idx,onResolve){
+  const opp=1-activatorSide;
+  const oppP=G.players[opp];
+  const eligible=[];
+  oppP.st.forEach((c,i)=>{ if(c && c.faceDown && base(c).fx==='dark_bribe') eligible.push({i,c}); });
+  if(!eligible.length){ onResolve(); return; }
+  const activateBribe=(trapIdx,trapCard)=>{
+    trapCard.faceDown=false;
+    log(`${opp===ME?'You':'Bot'} activated ${base(trapCard).n}.`, opp===ME?'me':'opp');
+    SFX.activate(); markJustPlaced(trapCard.uid);
+    render();
+    const trapEl=zoneCardEl(opp,'st',trapIdx), targetEl=zoneCardEl(activatorSide,'st',idx);
+    const finish=()=>{
+      log(`Dark Bribe negates ${base(card).n} and destroys it! ${activatorSide===ME?'You draw':'Bot draws'} a card.`, opp===ME?'me':'opp');
+      if(G.players[activatorSide].st[idx]===card) sendToGY(activatorSide,card,'st',idx,'effect');
+      drawCard(activatorSide);
+      sendToGY(opp,trapCard,'st',trapIdx,'effect');
+      render();
+    };
+    if(trapEl && targetEl){ playBeam(trapEl,targetEl,'trap'); setTimeout(finish,340); }
+    else finish();
+  };
+  if(opp===ME){
+    const pick=eligible[0];
+    showModal('Activate a Trap?', `${activatorSide===ME?'You':'Bot'} activated ${base(card).n}. Respond with Dark Bribe?`, [
+      {label:base(pick.c).n, card:pick.c, action:()=>activateBribe(pick.i,pick.c)},
+      {label:'Pass', action:()=>onResolve()},
+    ]);
+  } else {
+    activateBribe(eligible[0].i, eligible[0].c);
+  }
 }
 function placeTrapSet(card,idx){
   G.players[ME].hand=G.players[ME].hand.filter(c=>c.uid!==card.uid);
@@ -1458,14 +1523,15 @@ function placeTrapSet(card,idx){
   SFX.place(); markJustPlaced(card.uid);
   render();
 }
-function activateFromField(pIdx,idx){
+function activateFromField(pIdx,idx,customResolve){
   const card=G.players[pIdx].st[idx];
   const b=base(card);
   card.faceDown=false;
   log(`${pIdx===ME?'You':'Bot'} activated ${b.n}.`, pIdx===ME?'me':'opp');
   SFX.activate(); markJustPlaced(card.uid);
   render();
-  resolveSpellTrapEffect(pIdx,card,idx);
+  if(customResolve) customResolve();
+  else resolveSpellTrapEffect(pIdx,card,idx);
 }
 function flipSummon(pIdx,idx){
   const card=G.players[pIdx].mon[idx];
@@ -1493,24 +1559,25 @@ function afterSummon(pIdx,card,idx){
   }
   afterAnySummon(pIdx,card,idx,false);
 }
-function afterAnySummon(pIdx,card,idx,wasSetOrFlip){
+function afterAnySummon(pIdx,card,idx,wasSetOrFlip,isSpecial){
   // Princess of Tsurugi (controlled by the opponent of the summoner)
   const opp=1-pIdx;
   const pt=G.players[opp].mon.find(m=>m && !m.faceDown && base(m).fx==='princess_of_tsurugi');
   if(pt){ dealDamage(pIdx,500); log(`Princess of Tsurugi inflicts 500 damage.`, pIdx===ME?'opp':'me'); }
-  // Trap window: Trap Hole / Torrential Tribute / Floodgate Trap Hole controlled by the opponent
-  openSummonTrapWindow(pIdx,card,idx);
+  // Trap window: Trap Hole / Torrential Tribute / Floodgate Trap Hole / Horn of Heaven controlled by the opponent
+  openSummonTrapWindow(pIdx,card,idx,!!isSpecial);
 }
-function openSummonTrapWindow(summonerIdx,card,idx){
+function openSummonTrapWindow(summonerIdx,card,idx,isSpecial){
   const opp=1-summonerIdx;
   const oppP=G.players[opp];
   const eligible=[];
   oppP.st.forEach((c,i)=>{
     if(c && c.faceDown){
       const fx=base(c).fx;
-      if(fx==='trap_hole' && effAtk(card)>=1500) eligible.push({i,c,fx});
+      if(fx==='trap_hole' && !isSpecial && effAtk(card)>=1500) eligible.push({i,c,fx});
       else if(fx==='torrential_tribute') eligible.push({i,c,fx});
       else if(fx==='floodgate_trap_hole') eligible.push({i,c,fx});
+      else if(fx==='horn_of_heaven' && isSpecial) eligible.push({i,c,fx});
     }
   });
   if(!eligible.length) return;
@@ -1542,12 +1609,15 @@ function resolveSummonTrap(defenderIdx,trapIdx,trapCard,fx,summonerIdx,summonedC
         summonedCard.pos='def'; summonedCard.faceDown=false; summonedCard.positionLocked=true;
         log(`Floodgate Trap Hole flips ${base(summonedCard).n} face-up and locks it in Defense Position.`, defenderIdx===ME?'me':'opp');
       }
+    } else if(fx==='horn_of_heaven'){
+      log(`Horn of Heaven negates the Special Summon and destroys ${base(summonedCard).n}!`, defenderIdx===ME?'me':'opp');
+      sendToGY(summonerIdx,summonedCard,'mon',summonedIdx,'effect');
     }
     G.gy.push(trapCard); G.players[defenderIdx].st[trapIdx]=null;
     render();
     checkWin();
   };
-  if((fx==='trap_hole' || fx==='floodgate_trap_hole') && trapEl){
+  if((fx==='trap_hole' || fx==='floodgate_trap_hole' || fx==='horn_of_heaven') && trapEl){
     const targetEl=zoneCardEl(summonerIdx,'mon',summonedIdx);
     if(targetEl){ playBeam(trapEl,targetEl,'trap'); setTimeout(finish,340); return; }
   } else if(fx==='torrential_tribute' && trapEl){
@@ -1650,18 +1720,28 @@ function openAttackTrapWindow(attackerSide,defenderSide,attacker,atkIdx,targetId
 function resolveTrapVsAttack(fx,attackerSide,defenderSide,attacker,atkIdx,targetIdx,cb,trapSide,trapIdx){
   const trapEl = trapSide!==undefined ? zoneCardEl(trapSide,'st',trapIdx) : null;
   const atkEl = zoneCardEl(attackerSide,'mon',atkIdx);
+  const trapCard = trapSide!==undefined ? G.players[trapSide].st[trapIdx] : null;
+  function trapToGY(){ if(trapCard){ sendToGY(trapSide,trapCard,'st',trapIdx,'effect'); render(); } }
   if(trapEl && atkEl && ['magic_cylinder','draining_shield','dimensional_prison','solemn_judgment'].includes(fx)) playBeam(trapEl,atkEl,'trap');
-  if(fx==='magic_cylinder'){ dealDamage(attackerSide,effAtk(attacker)); log(`Magic Cylinder reflects ${effAtk(attacker)} damage!`, defenderSide===ME?'me':'opp'); cb(true); }
-  else if(fx==='draining_shield'){ gainHealth(defenderSide,effAtk(attacker)); log(`Draining Shield gains ${effAtk(attacker)} Health!`, defenderSide===ME?'me':'opp'); cb(true); }
-  else if(fx==='dimensional_prison'){ G.players[attackerSide].mon[atkIdx]=null; log(`Dimensional Prison banishes ${base(attacker).n}!`, defenderSide===ME?'me':'opp'); cb(true); }
-  else if(fx==='waboku'){ G.waboku=defenderSide; log(`Waboku will prevent battle damage and destruction this turn.`, defenderSide===ME?'me':'opp'); cb(false); }
+  if(fx==='magic_cylinder'){ dealDamage(attackerSide,effAtk(attacker)); log(`Magic Cylinder reflects ${effAtk(attacker)} damage!`, defenderSide===ME?'me':'opp'); trapToGY(); cb(true); }
+  else if(fx==='draining_shield'){ gainHealth(defenderSide,effAtk(attacker)); log(`Draining Shield gains ${effAtk(attacker)} Health!`, defenderSide===ME?'me':'opp'); trapToGY(); cb(true); }
+  else if(fx==='dimensional_prison'){ banish(attackerSide,attacker,'mon',atkIdx); log(`Dimensional Prison banishes ${base(attacker).n}!`, defenderSide===ME?'me':'opp'); trapToGY(); cb(true); }
+  else if(fx==='waboku'){ G.waboku=defenderSide; log(`Waboku will prevent battle damage and destruction this turn.`, defenderSide===ME?'me':'opp'); trapToGY(); cb(false); }
   else if(fx==='solemn_judgment'){
-    G.health[defenderSide]=Math.floor(G.health[defenderSide]/2); render();
-    G.players[attackerSide].mon[atkIdx]=null;
+    G.health[defenderSide]=Math.floor(G.health[defenderSide]/2);
+    sendToGY(attackerSide,attacker,'mon',atkIdx,'effect');
     log(`Solemn Judgment negates the attack and destroys ${base(attacker).n}! Half Health paid.`, defenderSide===ME?'me':'opp');
+    trapToGY();
     cb(true);
   }
   else cb(false);
+}
+function grantExtraAttackIfEligible(attacker){
+  if(base(attacker).fx==='great_white' && attacker.usedGreatWhite!==G.turnNum){
+    attacker.usedGreatWhite=G.turnNum;
+    attacker.attacked=false;
+    log(`${base(attacker).n} destroyed a monster — it can attack again!`, attacker.controller===ME?'me':'opp');
+  }
 }
 function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
   const attacker=G.players[attackerSide].mon[atkIdx];
@@ -1689,6 +1769,7 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
       protectedDestroy(defenderSide,defender,targetIdx);
       if(G.waboku!==defenderSide) dealDamage(defenderSide,dmg);
       log(`${base(attacker).n} destroys ${base(defender).n}! ${G.waboku===defenderSide?0:dmg} damage.`,attackerSide===ME?'me':'opp');
+      grantExtraAttackIfEligible(attacker);
     } else if(aAtk<dAtk){
       const dmg=dAtk-aAtk;
       protectedDestroy(attackerSide,attacker,atkIdx);
@@ -1704,6 +1785,7 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
     if(aAtk>dDef){
       protectedDestroy(defenderSide,defender,targetIdx);
       log(`${base(attacker).n} destroys ${base(defender).n} (Defense Position). No Battle Damage.`,attackerSide===ME?'me':'opp');
+      grantExtraAttackIfEligible(attacker);
     } else if(aAtk<dDef){
       const dmg=dDef-aAtk;
       dealDamage(attackerSide,dmg);
@@ -1731,6 +1813,8 @@ function offerTrapActivation(pIdx,idx,card,onYes){
 }
 
 function allOwnedMonsters(pIdx){ const arr=[]; G.players[pIdx].mon.forEach((m,i)=>{ if(m) arr.push(i); }); return arr; }
+const RESPONSE_ONLY_TRAP_FX=new Set(['trap_hole','torrential_tribute','floodgate_trap_hole','michizure',
+  'magic_cylinder','draining_shield','dimensional_prison','waboku','solemn_judgment','dark_bribe','horn_of_heaven']);
 
 function resolveSpellTrapEffect(pIdx,card,idx){
   const fx=base(card).fx;
@@ -1775,20 +1859,20 @@ function resolveSpellTrapEffect(pIdx,card,idx){
     case 'just_desserts': { const n=G.players[opp].mon.filter(m=>m).length; dealDamage(opp,n*500); toGYSelf(); break; }
     case 'monster_reborn': {
       const opts=G.gy.filter(c=>isMonster(c));
-      const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.');return;} G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.tempAtk=0; c.equips=[]; G.players[pIdx].mon[z]=c; log(`${pIdx===ME?'You':'Bot'} Special Summoned ${base(c).n} with Monster Reborn.`,pIdx===ME?'me':'opp'); render(); };
+      const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.');return;} G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.tempAtk=0; c.equips=[]; G.players[pIdx].mon[z]=c; log(`${pIdx===ME?'You':'Bot'} Special Summoned ${base(c).n} with Monster Reborn.`,pIdx===ME?'me':'opp'); render(); afterAnySummon(pIdx,c,z,false,true); };
       if(opts.length){ if(pIdx===ME) showModal('Monster Reborn','Choose a monster to Special Summon:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[opts.length-1]); }
       toGYSelf(); break;
     }
     case 'unexpected_dai': {
       const opts=G.gy.filter(c=>isMonster(c)&&base(c).l<=4);
-      const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.');return;} G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.banishOnLeave=true; G.players[pIdx].mon[z]=c; log(`${pIdx===ME?'You':'Bot'} Special Summoned ${base(c).n} with Unexpected Dai.`,pIdx===ME?'me':'opp'); render(); };
+      const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.');return;} G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.banishOnLeave=true; G.players[pIdx].mon[z]=c; log(`${pIdx===ME?'You':'Bot'} Special Summoned ${base(c).n} with Unexpected Dai.`,pIdx===ME?'me':'opp'); render(); afterAnySummon(pIdx,c,z,false,true); };
       if(opts.length){ if(pIdx===ME) showModal('Unexpected Dai','Choose a Level 4 or lower monster:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[0]); }
       toGYSelf(); break;
     }
     case 'premature_burial': {
       if(G.health[pIdx]<=800){ toast('Not enough Health.'); G.players[pIdx].st[idx]=null; break; }
       const opts=G.gy.filter(c=>isMonster(c));
-      const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.'); return;} G.health[pIdx]-=800; G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.equips=['premature_burial']; G.players[pIdx].mon[z]=c; card.faceDown=false; G.players[pIdx].st[idx]=card; render(); log(`${pIdx===ME?'You':'Bot'} pays 800 Health to Special Summon ${base(c).n}.`,pIdx===ME?'me':'opp'); };
+      const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.'); return;} G.health[pIdx]-=800; G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.equips=['premature_burial']; G.players[pIdx].mon[z]=c; card.faceDown=false; G.players[pIdx].st[idx]=card; render(); log(`${pIdx===ME?'You':'Bot'} pays 800 Health to Special Summon ${base(c).n}.`,pIdx===ME?'me':'opp'); afterAnySummon(pIdx,c,z,false,true); };
       if(opts.length){ if(pIdx===ME) showModal('Premature Burial','Choose a monster to Special Summon (pay 800 Health):',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[0]); return; }
       toGYSelf(); break;
     }
@@ -1869,10 +1953,11 @@ function resolveSpellTrapEffect(pIdx,card,idx){
       const place=(c)=>{
         const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.');return;}
         G.gy=G.gy.filter(x=>x.uid!==c.uid);
-        Object.assign(c,{faceDown:false,pos:'atk',controller:pIdx,zone:z,summonedTurn:G.turnNum,attacked:false,tempAtk:0,equips:[],linkedContinuous:idx});
+        Object.assign(c,{faceDown:false,pos:'atk',controller:pIdx,zone:z,summonedTurn:G.turnNum,attacked:false,tempAtk:0,equips:[],linkedContinuous:card.uid});
         G.players[pIdx].mon[z]=c;
         log(`${pIdx===ME?'You':'Bot'} Special Summons ${base(c).n} with Call of the Haunted.`,pIdx===ME?'me':'opp');
         render();
+        afterAnySummon(pIdx,c,z,false,true);
       };
       if(opts.length){ if(pIdx===ME) showModal('Call of the Haunted','Special Summon a monster from the Graveyard:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[opts.length-1]); }
       /* continuous: stays face-up on the field, not sent to GY */
@@ -1929,7 +2014,7 @@ function showModal(title,body,opts){
       peek.addEventListener('click',(e)=>{ e.stopPropagation(); showCardPopup(o.card,false); });
       d.appendChild(peek);
     }
-    d.addEventListener('click',()=>{ document.body.removeChild(bg); o.action(); });
+    d.addEventListener('click',(e)=>{ e.stopPropagation(); document.body.removeChild(bg); o.action(); });
     row.appendChild(d);
   });
   m.appendChild(row); bg.appendChild(m); document.body.appendChild(bg);
