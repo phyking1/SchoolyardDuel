@@ -115,6 +115,33 @@ button{font-family:inherit;cursor:pointer;}
 .opp-hand-count{font-size:clamp(.5em,1.5vw,.62em);color:var(--dim);background:#10241a;
   border:1px solid #234;padding:0 4px;border-radius:4px;white-space:nowrap;flex:0 0 auto;}
 
+/* Table View: a spatial seating layout instead of the stacked list -- two opponents face you at
+   the top, and (in a 4-player game) the seat to your right sits on a second page you pan to. */
+#view-toggle-row{display:flex;justify-content:center;padding:2px 0;}
+#view-toggle-btn{background:var(--panel2);border:1px solid var(--gold-dim);color:var(--gold);
+  border-radius:8px;padding:3px 10px;font-size:.68em;font-weight:700;cursor:pointer;}
+#view-toggle-btn:hover{border-color:var(--gold);}
+#table-view{display:none;position:relative;height:clamp(160px,30vh,230px);}
+#board.table-mode #table-view{display:block;}
+#board.table-mode #opp-stack{display:none;}
+#table-scroll{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;height:100%;
+  -webkit-overflow-scrolling:touch;scrollbar-width:none;}
+#table-scroll::-webkit-scrollbar{display:none;}
+.table-page{min-width:100%;flex-shrink:0;scroll-snap-align:start;box-sizing:border-box;
+  display:flex;align-items:center;justify-content:center;height:100%;gap:10px;padding:0 8px;}
+#table-page-top{gap:10px;}
+#table-page-top .opp-panel{flex:1 1 0;max-width:47%;}
+.opp-panel.rotated-right{flex:0 0 auto;width:220px;height:112px;transform:rotate(90deg);}
+#table-page-right:not(.has-right){display:none;}
+#table-pan-controls{position:absolute;bottom:0;left:0;right:0;display:flex;align-items:center;
+  justify-content:center;gap:10px;pointer-events:none;padding-bottom:2px;}
+#table-pan-controls.single-page{display:none;}
+#table-pan-controls button{pointer-events:auto;background:rgba(20,20,20,.65);border:1px solid var(--gold-dim);
+  color:var(--gold);border-radius:50%;width:24px;height:24px;font-size:.72em;line-height:1;cursor:pointer;}
+#table-pan-dots{display:flex;gap:5px;}
+.pan-dot{width:6px;height:6px;border-radius:50%;background:#444;display:inline-block;}
+.pan-dot.active{background:var(--gold);}
+
 .hand-row{display:flex;justify-content:center;gap:clamp(3px,1.2vw,6px);flex:0 0 auto;padding:4px 0;
   min-height:clamp(66px,18.4vw,106px);align-items:flex-end;flex-wrap:wrap;}
 .hand-row.opp{min-height:clamp(44px,12.6vw,70px);align-items:flex-start;}
@@ -430,7 +457,21 @@ button{font-family:inherit;cursor:pointer;}
 <div id="game-root">
   <div id="board-wrap">
     <div id="board">
+      <div id="view-toggle-row">
+        <button id="view-toggle-btn" type="button">🗺️ Table View</button>
+      </div>
       <div id="opp-stack"></div>
+      <div id="table-view">
+        <div id="table-scroll">
+          <div class="table-page" id="table-page-top"></div>
+          <div class="table-page" id="table-page-right"></div>
+        </div>
+        <div id="table-pan-controls">
+          <button id="table-pan-left" type="button">◀</button>
+          <div id="table-pan-dots"><span class="pan-dot active" data-page="0"></span><span class="pan-dot" data-page="1"></span></div>
+          <button id="table-pan-right" type="button">▶</button>
+        </div>
+      </div>
       <div class="center-row">
         <div class="pile" id="pile-deck" title="Shared Deck">
           <div class="pile-label" id="deck-count">80</div>
@@ -487,7 +528,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v32';
+const GAME_VERSION='v33';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -608,6 +649,8 @@ let uidc=1;
 const G={
   startHealth:8000,
   numPlayers:2, // 2-4; seats beyond ME(=0) are bots. Rebuilt by beginDuel() to match.
+  viewMode:'list', // 'list' (stacked opponent panels) or 'table' (spatial seating, pan to view)
+  tablePage:0, // which table-view page is currently scrolled into view (0=top, 1=right)
   health:[8000,8000],
   deck:[],gy:[],
   players:[
@@ -652,8 +695,15 @@ function markJustPlaced(uid){
   justPlacedSet.add(uid);
   setTimeout(()=>justPlacedSet.delete(uid),650);
 }
+// Opponent seats can be rendered into both the List View and Table View DOM trees at once (only
+// one is visible via CSS at a time) -- pick whichever candidate element is actually on-screen so
+// animations/float numbers don't silently land on a display:none copy.
+function firstVisible(ids){
+  for(const id of ids){ const el=document.getElementById(id); if(el && el.offsetParent!==null) return el; }
+  return document.getElementById(ids[0]) || null;
+}
 function floatNumber(pIdx,text,cls){
-  const anchor=document.getElementById(pIdx===ME?'hn-me':'hn-'+pIdx);
+  const anchor = pIdx===ME ? document.getElementById('hn-me') : firstVisible(['hn-'+pIdx,'hn-t'+pIdx]);
   if(!anchor) return;
   const rect=anchor.getBoundingClientRect();
   const el=document.createElement('div');
@@ -663,7 +713,9 @@ function floatNumber(pIdx,text,cls){
   setTimeout(()=>el.remove(),900);
 }
 function zoneCardEl(pIdx,type,idx){
-  return document.querySelector(`.zone[data-side="${pIdx}"][data-type="${type}"][data-idx="${idx}"] .card`);
+  const matches=document.querySelectorAll(`.zone[data-side="${pIdx}"][data-type="${type}"][data-idx="${idx}"] .card`);
+  for(const el of matches){ if(el.offsetParent!==null) return el; }
+  return matches[0] || null;
 }
 function playClashAnimation(attackerSide,defenderSide,atkIdx,targetIdx,cb){
   const atkEl=zoneCardEl(attackerSide,'mon',atkIdx);
@@ -807,6 +859,49 @@ function buildOpponentPanels(){
     stack.appendChild(panel);
   }
 }
+// Builds the spatial "table" layout: seats 1 and 2 face you across the top (both visible without
+// panning); seat 3, if there is one, sits to your right on a second page you pan to, rotated 90°
+// to read as if you turned to look beside you.
+function buildTableView(){
+  const topPage=document.getElementById('table-page-top');
+  const rightPage=document.getElementById('table-page-right');
+  topPage.innerHTML=''; rightPage.innerHTML='';
+  const compact = G.numPlayers>3 ? ' compact' : '';
+  const buildPanel=(s,rotated)=>{
+    const panel=document.createElement('div');
+    panel.className='opp-panel table-slot'+(rotated?' rotated-right':''); panel.dataset.seat=s; panel.id='table-panel-'+s;
+    panel.innerHTML=
+      `<div class="opp-panel-header">`+
+        `<div class="opp-panel-name">${pName(s)}</div>`+
+        `<div class="opp-hp-bar-wrap"><div class="opp-hp-bar" id="hb-t${s}"></div></div>`+
+        `<div class="opp-hp-num" id="hn-t${s}">${G.startHealth}</div>`+
+        `<div class="opp-hand-count" id="handcount-t${s}">H:0</div>`+
+      `</div>`+
+      `<div class="hand-row opp${compact}" id="hand-t${s}"></div>`+
+      `<div class="zone-row${compact}" id="st-t${s}"></div>`+
+      `<div class="zone-row${compact}" id="mon-t${s}"></div>`;
+    return panel;
+  };
+  for(let s=1;s<G.numPlayers && s<=2;s++) topPage.appendChild(buildPanel(s,false));
+  const hasRight = G.numPlayers>3;
+  rightPage.classList.toggle('has-right',hasRight);
+  if(hasRight) rightPage.appendChild(buildPanel(3,true));
+  document.getElementById('table-pan-controls').classList.toggle('single-page',!hasRight);
+  const scroll=document.getElementById('table-scroll'); if(scroll) scroll.scrollLeft=0;
+  G.tablePage=0;
+  document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===0));
+}
+function switchViewMode(mode){
+  G.viewMode=mode;
+  document.getElementById('board').classList.toggle('table-mode', mode==='table');
+  document.getElementById('view-toggle-btn').textContent = mode==='table' ? '📋 List View' : '🗺️ Table View';
+  if(mode==='table'){
+    const scroll=document.getElementById('table-scroll'); if(scroll) scroll.scrollLeft=0;
+    G.tablePage=0;
+    document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===0));
+  }
+  render();
+}
 function beginDuel(){
   document.getElementById('start-screen').style.display='none';
   document.getElementById('game-root').style.display='flex';
@@ -819,6 +914,7 @@ function beginDuel(){
     {hand:[],mon:[null,null,null,null],st:[null,null,null,null],normalSummonUsed:false,fdSummonThisTurn:null,eliminated:false}
   ));
   buildOpponentPanels();
+  buildTableView();
   // opening hands: 5 each
   for(let i=0;i<5;i++){
     for(let s=0;s<G.numPlayers;s++) drawCard(s,true);
@@ -1335,6 +1431,22 @@ function render(){
     if(panel){
       panel.classList.toggle('active-turn',G.active===s);
       panel.classList.toggle('eliminated',!!G.players[s].eliminated);
+    }
+    // Table View mirrors the same per-seat data into its own (spatially-positioned) DOM nodes,
+    // when this seat has one -- id suffix 't{s}' instead of '{s}'. Kept in sync every render so
+    // switching views never shows stale state.
+    const hbT=document.getElementById('hb-t'+s); if(hbT) hbT.style.width=(100*Math.max(0,G.health[s])/G.startHealth)+'%';
+    const hnT=document.getElementById('hn-t'+s); if(hnT) hnT.textContent=G.health[s];
+    const hcT=document.getElementById('handcount-t'+s); if(hcT) hcT.textContent='H:'+G.players[s].hand.length;
+    if(document.getElementById('mon-t'+s)){
+      renderZoneRow('mon-t'+s,s,'mon'); renderZoneRow('st-t'+s,s,'st');
+      renderHandRow('hand-t'+s,s);
+    }
+    const handElT=document.getElementById('hand-t'+s); if(handElT) handElT.classList.toggle('active-turn',G.active===s);
+    const panelT=document.getElementById('table-panel-'+s);
+    if(panelT){
+      panelT.classList.toggle('active-turn',G.active===s);
+      panelT.classList.toggle('eliminated',!!G.players[s].eliminated);
     }
   }
 
@@ -2554,6 +2666,22 @@ function openCardCarousel(title,defs){
 
 document.getElementById('decklist-btn').addEventListener('click',()=>{
   openCardBrowser('Deck List ('+allCardDefs().length+')', allCardDefs());
+});
+
+document.getElementById('view-toggle-btn').addEventListener('click',()=>{
+  switchViewMode(G.viewMode==='table' ? 'list' : 'table');
+});
+document.getElementById('table-pan-left').addEventListener('click',()=>{
+  const el=document.getElementById('table-scroll'); el.scrollBy({left:-el.clientWidth,behavior:'smooth'});
+});
+document.getElementById('table-pan-right').addEventListener('click',()=>{
+  const el=document.getElementById('table-scroll'); el.scrollBy({left:el.clientWidth,behavior:'smooth'});
+});
+document.getElementById('table-scroll').addEventListener('scroll',()=>{
+  const el=document.getElementById('table-scroll');
+  const page=Math.round(el.scrollLeft/Math.max(1,el.clientWidth));
+  G.tablePage=page;
+  document.querySelectorAll('#table-pan-dots .pan-dot').forEach((d,i)=>d.classList.toggle('active',i===page));
 });
 
 /* ============================= BOT AI ============================= */
