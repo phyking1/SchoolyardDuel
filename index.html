@@ -465,7 +465,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v26';
+const GAME_VERSION='v27';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1742,6 +1742,15 @@ function getActivatableMonsterEffect(card,pIdx,zoneIdx){
         log(`${b.n} destroys ${base(t).n}!`,pIdx===ME?'me':'opp');
         sendToGY(opp,t,'mon',zi,'effect');
       }
+      render();
+    }};
+  }
+  if(b.fx==='ufo_turtle'){
+    return {label:'Tribute: Inflict 400 Damage',activate:()=>{
+      const opp=1-pIdx;
+      sendToGY(pIdx,card,'mon',zoneIdx,'tribute');
+      dealDamage(opp,400);
+      log(`${pIdx===ME?'You':'Bot'} tributes ${b.n} to inflict 400 damage!`,pIdx===ME?'me':'opp');
       render();
     }};
   }
