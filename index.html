@@ -465,7 +465,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v23';
+const GAME_VERSION='v24';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -594,6 +594,7 @@ const G={
   first:0, active:0, turnNum:0,
   phase:'draw',
   attrMod:null, // {a:'FIRE',delta:+600}
+  noBattleDamage:[false,false], // Kuriboh shield, per player, cleared at End Phase
   selection:null, // ui selection state
   gameOver:false,
   isBot:[false,true],
@@ -931,8 +932,9 @@ function endGame(winner){
   document.getElementById('gameover-bg').style.display='flex';
   if(winner===ME) SFX.victory(); else SFX.defeat();
 }
-function dealDamage(pIdx,amount){
+function dealDamage(pIdx,amount,isBattle){
   if(amount<=0) return;
+  if(isBattle && G.noBattleDamage[pIdx]){ log(`Kuriboh's shield prevents the Battle Damage.`,'sys'); return; }
   G.health[pIdx]=Math.max(0,G.health[pIdx]-amount);
   floatNumber(pIdx,'-'+amount,'dmg');
   SFX.hit();
@@ -1420,20 +1422,27 @@ function onZoneCardClick(pIdx,type,idx){
   if(!G.selection && (G.phase==='main1'||G.phase==='main2') && G.active===ME && pIdx===ME && type==='mon'){
     const card=G.players[ME].mon[idx];
     if(!card) return;
-    if(card.summonedTurn===G.turnNum && !card.faceDown){ toast("Can't change position the turn it was Summoned."); return; }
-    if(card.positionLocked){ toast("This monster's Battle Position is locked."); return; }
     if(card.faceDown){
       showModal(base(card).n,'Flip Summon this Set monster face-up?',[
         {label:'Flip Summon',action:()=>flipSummon(ME,idx)},
         {label:'Cancel',action:()=>{}},
       ]);
-    } else {
-      const to = card.pos==='atk'?'def':'atk';
-      showModal(base(card).n,`Change to ${to==='atk'?'Attack':'Defense'} Position?`,[
-        {label:'Confirm',action:()=>{card.pos=to; log(`Changed ${base(card).n} to ${to==='atk'?'Attack':'Defense'} Position.`,'me'); render();}},
-        {label:'Cancel',action:()=>{}},
-      ]);
+      return;
     }
+    const canChangePos=card.summonedTurn!==G.turnNum && !card.positionLocked;
+    const eff=getActivatableMonsterEffect(card,ME,idx);
+    const opts=[];
+    if(canChangePos){
+      const to=card.pos==='atk'?'def':'atk';
+      opts.push({label:`Change to ${to==='atk'?'Attack':'Defense'} Position`,action:()=>{card.pos=to; log(`Changed ${base(card).n} to ${to==='atk'?'Attack':'Defense'} Position.`,'me'); render();}});
+    }
+    if(eff) opts.push({label:eff.label,action:eff.activate});
+    if(!opts.length){
+      toast(card.positionLocked?"This monster's Battle Position is locked.":"Can't change position the turn it was Summoned.");
+      return;
+    }
+    opts.push({label:'Cancel',action:()=>{}});
+    showModal(base(card).n,'Choose an action:',opts);
     return;
   }
   // activate a set spell/trap you control
@@ -1547,7 +1556,7 @@ function afterSummon(pIdx,card,idx){
   if(fx==='jerry_beans_man'){ drawCard(pIdx); if(G.players[pIdx].hand.length){ const disc=G.players[pIdx].hand[0]; G.players[pIdx].hand.shift(); G.gy.push(disc); log(`${pIdx===ME?'You':'Bot'} drew then discarded a card (Jerry Beans Man).`,pIdx===ME?'me':'opp'); render(); } }
   if(fx==='hunter_dragon'){
     const opp=1-pIdx;
-    const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown && m.pos==='def') targets.push(i); });
+    const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown && m.pos==='def' && !m.unaffectedByEffects) targets.push(i); });
     if(targets.length){
       if(pIdx===ME){
         showModal('Hunter Dragon','Destroy a face-up Defense Position monster?',
@@ -1627,6 +1636,62 @@ function resolveSummonTrap(defenderIdx,trapIdx,trapCard,fx,summonerIdx,summonedC
   }
   finish();
 }
+function getActivatableMonsterEffect(card,pIdx,zoneIdx){
+  const b=base(card);
+  const usedThisTurn=card.usedEffectTurn===G.turnNum;
+  if(b.fx==='guardragon_justicia'){
+    if(usedThisTurn || !G.players[pIdx].hand.length) return null;
+    return {label:'Discard 1: Draw 1',activate:()=>{
+      card.usedEffectTurn=G.turnNum;
+      const doIt=(disc)=>{
+        sendToGY(pIdx,disc,'hand',-1,'effect');
+        drawCard(pIdx);
+        log(`${pIdx===ME?'You':'Bot'} discards a card to draw with ${b.n}.`,pIdx===ME?'me':'opp');
+        render();
+      };
+      if(pIdx===ME) showModal(b.n,'Discard which card?',G.players[ME].hand.map(c=>({label:base(c).n,card:c,action:()=>doIt(c)})));
+      else doIt(G.players[BOT].hand[0]);
+    }};
+  }
+  if(b.fx==='infernity_archer'){
+    if(G.players[pIdx].hand.length>0) return null;
+    const opp=1-pIdx;
+    const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown) targets.push(i); });
+    if(!targets.length) return null;
+    return {label:'Force Face-Down Defense',activate:()=>{
+      const doIt=(ti)=>{
+        const t=G.players[opp].mon[ti];
+        t.faceDown=true; t.pos='def';
+        log(`${b.n} forces ${base(t).n} face-down in Defense Position.`,pIdx===ME?'me':'opp');
+        render();
+      };
+      if(pIdx===ME) showModal(b.n,'Target which face-up monster?',targets.map(ti=>({label:base(G.players[opp].mon[ti]).n,action:()=>doIt(ti)})));
+      else doIt(targets[0]);
+    }};
+  }
+  if(b.fx==='homunculus'){
+    if(usedThisTurn || G.health[pIdx]<=500) return null;
+    return {label:'Pay 500 Health: +500 ATK',activate:()=>{
+      card.usedEffectTurn=G.turnNum;
+      G.health[pIdx]-=500;
+      card.tempAtk=(card.tempAtk||0)+500;
+      log(`${pIdx===ME?'You pay':'Bot pays'} 500 Health — ${b.n} gains 500 ATK!`,pIdx===ME?'me':'opp');
+      render();
+    }};
+  }
+  if(b.fx==='rai_rider'){
+    if(usedThisTurn) return null;
+    return {label:'Halve ATK: Become Unaffected',activate:()=>{
+      card.usedEffectTurn=G.turnNum;
+      const half=Math.floor(effAtk(card)/2);
+      card.tempAtk=(card.tempAtk||0)-half;
+      card.unaffectedByEffects=true;
+      log(`${pIdx===ME?'You':'Bot'} halves ${b.n}'s ATK — it becomes unaffected by other monsters' effects!`,pIdx===ME?'me':'opp');
+      render();
+    }};
+  }
+  return null;
+}
 function triggerFlip(pIdx,card,idx){
   const fx=base(card).fx;
   const opp=1-pIdx;
@@ -1650,7 +1715,7 @@ function triggerFlip(pIdx,card,idx){
     }
   }
   else if(fx==='old_vindictive_magician'){
-    const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && effAtk(m)<=1500) targets.push(i); });
+    const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && effAtk(m)<=1500 && !m.unaffectedByEffects) targets.push(i); });
     if(targets.length){
       const doIt=(i)=>{ log(`Old Vindictive Magician destroys ${base(G.players[opp].mon[i]).n}.`,pIdx===ME?'me':'opp'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect'); render(); };
       if(pIdx===ME) showModal('Old Vindictive Magician','Destroy a monster with 1500 or less ATK?', targets.map(i=>({label:base(G.players[opp].mon[i]).n,action:()=>doIt(i)})).concat([{label:'Skip',action:()=>{}}]));
@@ -1660,7 +1725,7 @@ function triggerFlip(pIdx,card,idx){
   else if(fx==='cure_mermaid'){ gainHealth(pIdx,1000); log(`Cure Mermaid: +1000 Health.`,pIdx===ME?'me':'opp'); }
   else if(fx==='silver_fang'){
     if(Math.random()<0.5){
-      const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown && m.pos==='def' && effDef(m)<=effAtk(card)) targets.push(i); });
+      const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown && m.pos==='def' && effDef(m)<=effAtk(card) && !m.unaffectedByEffects) targets.push(i); });
       if(targets.length){ const i=targets[0]; log(`Silver Fang flips heads and destroys ${base(G.players[opp].mon[i]).n}.`,pIdx===ME?'me':'opp'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect'); render(); }
       else log('Silver Fang flips heads but had no valid target.','sys');
     } else log('Silver Fang flips tails — no effect.','sys');
@@ -1697,13 +1762,22 @@ function openAttackTrapWindow(attackerSide,defenderSide,attacker,atkIdx,targetId
   defP.st.forEach((c,i)=>{
     if(c && c.faceDown){
       const fx=base(c).fx;
-      if(['magic_cylinder','draining_shield','dimensional_prison','waboku','solemn_judgment','mirage_dragon_placeholder'].includes(fx)) eligible.push({i,c,fx});
+      if(['magic_cylinder','draining_shield','dimensional_prison','waboku','solemn_judgment'].includes(fx)) eligible.push({i,c,fx});
     }
   });
   const mirage=defP.mon.find(m=>m && !m.faceDown && base(m).fx==='mirage_dragon');
+  const kuriboh=!G.noBattleDamage[defenderSide] ? defP.hand.find(c=>base(c).fx==='kuriboh') : null;
+  const useKuriboh=()=>{
+    sendToGY(defenderSide,kuriboh,'hand',-1,'effect');
+    G.noBattleDamage[defenderSide]=true;
+    log(`${defenderSide===ME?'You discard':'Bot discards'} Kuriboh to negate Battle Damage this turn!`, defenderSide===ME?'me':'opp');
+    render();
+    cb(false);
+  };
   if(defenderSide===ME){
     const opts=eligible.map(e=>({label:base(e.c).n,card:e.c,action:()=>{ activateFromField(ME,e.i); resolveTrapVsAttack(e.fx,attackerSide,defenderSide,attacker,atkIdx,targetIdx,cb,defenderSide,e.i); }}));
     if(mirage) opts.push({label:'Negate with Mirage Dragon',card:mirage,action:()=>{ log('Mirage Dragon negates the attack!','me'); const mEl=zoneCardEl(defenderSide,'mon',defP.mon.indexOf(mirage)),aEl=zoneCardEl(attackerSide,'mon',atkIdx); if(mEl&&aEl) playBeam(mEl,aEl,'trap'); cb(true); }});
+    if(kuriboh) opts.push({label:'Discard Kuriboh',card:kuriboh,action:useKuriboh});
     if(opts.length===0){ cb(false); return; }
     opts.push({label:'Take the hit',action:()=>cb(false)});
     showModal('Incoming Attack!', `${base(attacker).n} (ATK ${effAtk(attacker)}) is attacking. Respond?`, opts);
@@ -1714,7 +1788,8 @@ function openAttackTrapWindow(attackerSide,defenderSide,attacker,atkIdx,targetId
       const pick=eligible[Math.floor(Math.random()*eligible.length)];
       activateFromField(BOT,pick.i);
       resolveTrapVsAttack(pick.fx,attackerSide,defenderSide,attacker,atkIdx,targetIdx,cb,defenderSide,pick.i);
-    } else cb(false);
+    } else if(kuriboh){ useKuriboh(); }
+    else cb(false);
   }
 }
 function resolveTrapVsAttack(fx,attackerSide,defenderSide,attacker,atkIdx,targetIdx,cb,trapSide,trapIdx){
@@ -1747,9 +1822,10 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
   const attacker=G.players[attackerSide].mon[atkIdx];
   if(!attacker){ render(); return; }
   if(targetIdx===-1){
+    const blocked=G.waboku===defenderSide||G.noBattleDamage[defenderSide];
     if(G.waboku===defenderSide){ log('Waboku prevents the Battle Damage.', defenderSide===ME?'me':'opp'); }
-    else dealDamage(defenderSide, effAtk(attacker));
-    log(`Direct attack deals ${G.waboku===defenderSide?0:effAtk(attacker)} damage!`, attackerSide===ME?'me':'opp');
+    else dealDamage(defenderSide, effAtk(attacker), true);
+    log(`Direct attack deals ${blocked?0:effAtk(attacker)} damage!`, attackerSide===ME?'me':'opp');
     render(); return;
   }
   const defender=G.players[defenderSide].mon[targetIdx];
@@ -1766,15 +1842,17 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
     const dAtk=effAtk(defender);
     if(aAtk>dAtk){
       const dmg=aAtk-dAtk;
+      const blocked=G.waboku===defenderSide||G.noBattleDamage[defenderSide];
       protectedDestroy(defenderSide,defender,targetIdx);
-      if(G.waboku!==defenderSide) dealDamage(defenderSide,dmg);
-      log(`${base(attacker).n} destroys ${base(defender).n}! ${G.waboku===defenderSide?0:dmg} damage.`,attackerSide===ME?'me':'opp');
+      if(G.waboku!==defenderSide) dealDamage(defenderSide,dmg,true);
+      log(`${base(attacker).n} destroys ${base(defender).n}! ${blocked?0:dmg} damage.`,attackerSide===ME?'me':'opp');
       grantExtraAttackIfEligible(attacker);
     } else if(aAtk<dAtk){
       const dmg=dAtk-aAtk;
+      const blocked=G.noBattleDamage[attackerSide];
       protectedDestroy(attackerSide,attacker,atkIdx);
-      dealDamage(attackerSide,dmg);
-      log(`${base(defender).n} destroys ${base(attacker).n}! ${dmg} damage.`,attackerSide===ME?'me':'opp');
+      dealDamage(attackerSide,dmg,true);
+      log(`${base(defender).n} destroys ${base(attacker).n}! ${blocked?0:dmg} damage.`,attackerSide===ME?'me':'opp');
     } else {
       protectedDestroy(attackerSide,attacker,atkIdx);
       protectedDestroy(defenderSide,defender,targetIdx);
@@ -1788,8 +1866,9 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
       grantExtraAttackIfEligible(attacker);
     } else if(aAtk<dDef){
       const dmg=dDef-aAtk;
-      dealDamage(attackerSide,dmg);
-      log(`${base(defender).n} withstands the attack! You take ${dmg} damage.`,attackerSide===ME?'me':'opp');
+      const blocked=G.noBattleDamage[attackerSide];
+      dealDamage(attackerSide,dmg,true);
+      log(`${base(defender).n} withstands the attack! You take ${blocked?0:dmg} damage.`,attackerSide===ME?'me':'opp');
     } else {
       log(`Attack bounces off ${base(defender).n} — no effect.`,'sys');
     }
@@ -1900,7 +1979,27 @@ function resolveSpellTrapEffect(pIdx,card,idx){
     }
     case 'change_of_heart': {
       const opts=[]; G.players[opp].mon.forEach((m,i)=>{ if(m) opts.push(i); });
-      const doIt=(i)=>{ const m=G.players[opp].mon[i]; G.players[opp].mon[i]=null; const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty zone.');return;} m.controller=pIdx; m.zone=z; m.tempEndPhaseReturn={owner:opp,ownIdx:i}; G.players[pIdx].mon[z]=m; log(`${pIdx===ME?'You':'Bot'} takes control of ${base(m).n}.`,pIdx===ME?'me':'opp'); render(); };
+      const doIt=(i)=>{
+        const m=G.players[opp].mon[i];
+        const canRespond=base(m).fx==='turtle_tiger' && m.usedEffectTurn!==G.turnNum && G.health[opp]>1000;
+        const proceedSwap=()=>{
+          G.players[opp].mon[i]=null; const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty zone.');return;}
+          m.controller=pIdx; m.zone=z; m.tempEndPhaseReturn={owner:opp,ownIdx:i}; G.players[pIdx].mon[z]=m;
+          log(`${pIdx===ME?'You':'Bot'} takes control of ${base(m).n}.`,pIdx===ME?'me':'opp'); render();
+        };
+        if(!canRespond){ proceedSwap(); return; }
+        const negate=()=>{
+          m.usedEffectTurn=G.turnNum;
+          G.health[opp]-=1000;
+          log(`${opp===ME?'You pay':'Bot pays'} 1000 Health — Turtle Tiger negates Change of Heart!`, opp===ME?'me':'opp');
+          render();
+        };
+        if(opp===ME) showModal('Turtle Tiger','Pay 1000 Health to negate Change of Heart and destroy it?',[
+          {label:'Pay 1000 Health',action:negate},
+          {label:'Allow it',action:proceedSwap},
+        ]);
+        else negate();
+      };
       if(opts.length){ if(pIdx===ME) showModal('Change of Heart','Take control of which monster?',opts.map(i=>({label:base(G.players[opp].mon[i]).n,action:()=>doIt(i)}))); else doIt(opts[0]); }
       toGYSelf(); break;
     }
@@ -2151,6 +2250,15 @@ function botStep1(){
       }
     }
   }
+  setTimeout(()=>botUseMonsterEffects(),700);
+}
+function botUseMonsterEffects(){
+  const p=G.players[BOT];
+  p.mon.forEach((m,i)=>{
+    if(!m || m.faceDown) return;
+    const eff=getActivatableMonsterEffect(m,BOT,i);
+    if(eff) eff.activate();
+  });
   setTimeout(()=>botStep2(),700);
 }
 function botStep2(){
@@ -2232,9 +2340,10 @@ function botAttackStep(fromIdx){
 const origDoEndPhase=doEndPhase;
 doEndPhase=function(){
   [ME,BOT].forEach(s=>{
-    G.players[s].mon.forEach(m=>{ if(m){ if(m.reverseGlasses) m.reverseGlasses=false; if(m.tempEndPhaseReturn){ const t=m.tempEndPhaseReturn; const zi=G.players[s].mon.indexOf(m); G.players[s].mon[zi]=null; m.controller=t.owner; m.zone=t.ownIdx; if(!G.players[t.owner].mon[t.ownIdx]) G.players[t.owner].mon[t.ownIdx]=m; delete m.tempEndPhaseReturn; } } });
+    G.players[s].mon.forEach(m=>{ if(m){ if(m.reverseGlasses) m.reverseGlasses=false; if(m.unaffectedByEffects) m.unaffectedByEffects=false; if(m.tempEndPhaseReturn){ const t=m.tempEndPhaseReturn; const zi=G.players[s].mon.indexOf(m); G.players[s].mon[zi]=null; m.controller=t.owner; m.zone=t.ownIdx; if(!G.players[t.owner].mon[t.ownIdx]) G.players[t.owner].mon[t.ownIdx]=m; delete m.tempEndPhaseReturn; } } });
   });
   G.waboku=null;
+  G.noBattleDamage=[false,false];
   if(G.skipDraw!==undefined && G.skipDraw!==null){ /* handled in doDrawPhase via consumption below */ }
   origDoEndPhase();
 };
