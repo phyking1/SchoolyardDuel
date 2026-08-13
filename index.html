@@ -528,7 +528,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v37';
+const GAME_VERSION='v38';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -889,18 +889,23 @@ function buildTableView(){
     return panel;
   };
 
-  // Bottom row, left to right: you, then your right-hand neighbor (seat 1) if there is one.
+  // Turn order is fixed as seat 0 (you), 1, 2, 3, wrapping -- i.e. seat N is N steps clockwise
+  // from you, regardless of who won the starting die roll (that only picks who goes FIRST, not
+  // the seating chart). So the seats are placed to trace that same clockwise path around the
+  // table: you -> across from you -> across from your neighbor -> your neighbor -> back to you.
+  // Your right-hand neighbor is therefore the LAST seat before play wraps back to you, not the
+  // first -- exactly like real clockwise dealing, where the player to your right acts just before
+  // you do.
   sceneBottom0.appendChild(buildPanel('You','tme',null,true));
   const hasNeighbor = G.numPlayers>=3;
-  if(hasNeighbor) sceneBottom1.appendChild(buildPanel(pName(1),'t1',1,false));
+  const neighborSeat = G.numPlayers-1;
+  if(hasNeighbor) sceneBottom1.appendChild(buildPanel(pName(neighborSeat),'t'+neighborSeat,neighborSeat,false));
 
-  // Top row, left to right: whoever faces you, then whoever faces your neighbor (seat 3, 4P only)
-  // -- kept in the same left-to-right order as the bottom row so panning the two stays in sync.
-  if(G.numPlayers>=2){
-    const acrossYou = G.numPlayers>=3 ? 2 : 1; // with a single opponent, they ARE the one across from you
-    sceneTop0.appendChild(buildPanel(pName(acrossYou),'t'+acrossYou,acrossYou,false));
-  }
-  if(G.numPlayers>=4) sceneTop1.appendChild(buildPanel(pName(3),'t3',3,false));
+  // Top row, left to right: whoever's turn comes right after yours (across from you), then
+  // whoever's next after that (across from your neighbor, 4P only) -- kept in the same
+  // left-to-right order as the bottom row so panning the two stays in sync.
+  if(G.numPlayers>=2) sceneTop0.appendChild(buildPanel(pName(1),'t1',1,false));
+  if(G.numPlayers>=4) sceneTop1.appendChild(buildPanel(pName(2),'t2',2,false));
 
   const st=document.getElementById('table-scroll-top'), sb=document.getElementById('table-scroll-bottom');
   if(st) st.scrollLeft=0; if(sb) sb.scrollLeft=0;
