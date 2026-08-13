@@ -487,7 +487,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v30';
+const GAME_VERSION='v31';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -740,6 +740,13 @@ function livingSeats(){
   const arr=[]; for(let i=0;i<G.numPlayers;i++) if(!G.players[i].eliminated) arr.push(i);
   return arr;
 }
+// TEMPORARY Phase C safety net: every card effect that says "opponent" still resolves against a
+// single hardcoded side rather than letting the activator choose among living opponents (that real
+// chooseOpponent()-based rewrite is Phase D). This just keeps that single-opponent math in bounds
+// for 3-4 players instead of computing a negative/invalid index (the old "1-pIdx" trick only works
+// for exactly 2 seats) — everyone still targets the human by default, or seat 1 if the human is the
+// one activating. Every current caller of this is a known Phase D TODO.
+function fallbackOpp(pIdx){ return pIdx===ME ? (G.numPlayers>1?1:ME) : ME; }
 
 /* ============================= SETUP FLOW ============================= */
 document.querySelectorAll('.health-btn').forEach(b=>{
@@ -988,11 +995,11 @@ function effDef(card){
 
 function doMainPhase(){
   render();
-  if(G.active===BOT) botMainPhase();
+  if(G.active!==ME) botMainPhase();
 }
 function doBattlePhase(){
   render();
-  if(G.active===BOT) botBattlePhase();
+  if(G.active!==ME) botBattlePhase();
 }
 function doEndPhase(){
   G.attrMod=null; // dice effect expires (a fresh one rolls next standby)
@@ -1462,7 +1469,7 @@ function isZoneTargetable(pIdx,type,idx){
   if(G.selection.type==='attack' && G.selection.stage==='target'){
     if(type!=='mon') return false;
     if(G.selection.mode==='direct') return false;
-    return pIdx===BOT && !!G.players[BOT].mon[idx];
+    return pIdx===G.selection.targetPlayer && !!G.players[pIdx].mon[idx];
   }
   return false;
 }
@@ -1567,7 +1574,7 @@ function finishLavaGolemSummon(card,tributeIdxs){
   afterAnySummon(BOT,card,z,false,true);
 }
 function onZoneCardClick(pIdx,type,idx){
-  if(G.selection && G.selection.type==='attack' && G.selection.stage==='target' && pIdx===BOT && type==='mon'){
+  if(G.selection && G.selection.type==='attack' && G.selection.stage==='target' && pIdx===G.selection.targetPlayer && type==='mon'){
     resolveAttack(G.selection.attackerIdx, idx);
     return;
   }
@@ -1656,7 +1663,7 @@ function placeSpell(card,idx,activate){
   else { log(`You Set a Spell/Trap.`,'me'); SFX.place(); render(); }
 }
 function offerDarkBribeResponse(activatorSide,card,idx,onResolve){
-  const opp=1-activatorSide;
+  const opp=fallbackOpp(activatorSide);
   const oppP=G.players[opp];
   const eligible=[];
   oppP.st.forEach((c,i)=>{ if(c && c.faceDown && base(c).fx==='dark_bribe') eligible.push({i,c}); });
@@ -1719,7 +1726,7 @@ function afterSummon(pIdx,card,idx){
   const fx=base(card).fx;
   if(fx==='jerry_beans_man'){ drawCard(pIdx); if(G.players[pIdx].hand.length){ const disc=G.players[pIdx].hand[0]; G.players[pIdx].hand.shift(); G.gy.push(disc); log(`${pIdx===ME?'You':'Bot'} drew then discarded a card (Jerry Beans Man).`,pIdx===ME?'me':'opp'); render(); } }
   if(fx==='hunter_dragon'){
-    const opp=1-pIdx;
+    const opp=fallbackOpp(pIdx);
     const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown && m.pos==='def' && !m.unaffectedByEffects) targets.push(i); });
     if(targets.length){
       if(pIdx===ME){
@@ -1734,7 +1741,7 @@ function afterSummon(pIdx,card,idx){
 }
 function afterAnySummon(pIdx,card,idx,wasSetOrFlip,isSpecial){
   // Princess of Tsurugi triggers on Normal/Flip Summons only (controlled by the opponent of the summoner)
-  const opp=1-pIdx;
+  const opp=fallbackOpp(pIdx);
   if(!isSpecial){
     const pt=G.players[opp].mon.find(m=>m && !m.faceDown && base(m).fx==='princess_of_tsurugi');
     if(pt){ dealDamage(pIdx,500); log(`Princess of Tsurugi inflicts 500 damage.`, pIdx===ME?'opp':'me'); }
@@ -1743,7 +1750,7 @@ function afterAnySummon(pIdx,card,idx,wasSetOrFlip,isSpecial){
   openSummonTrapWindow(pIdx,card,idx,!!isSpecial);
 }
 function openSummonTrapWindow(summonerIdx,card,idx,isSpecial){
-  const opp=1-summonerIdx;
+  const opp=fallbackOpp(summonerIdx);
   const oppP=G.players[opp];
   const eligible=[];
   oppP.st.forEach((c,i)=>{
@@ -1821,7 +1828,7 @@ function getActivatableMonsterEffect(card,pIdx,zoneIdx){
   }
   if(b.fx==='infernity_archer'){
     if(G.players[pIdx].hand.length>0) return null;
-    const opp=1-pIdx;
+    const opp=fallbackOpp(pIdx);
     const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown) targets.push(i); });
     if(!targets.length) return null;
     return {label:'Force Face-Down Defense',activate:()=>{
@@ -1857,7 +1864,7 @@ function getActivatableMonsterEffect(card,pIdx,zoneIdx){
     }};
   }
   if(b.fx==='time_wizard'){
-    const opp=1-pIdx;
+    const opp=fallbackOpp(pIdx);
     const hasTarget=G.players[opp].mon.some(m=>m && !m.unaffectedByEffects);
     if(!hasTarget) return null;
     return {label:'Flip Coins: Destroy Monsters',activate:()=>{
@@ -1877,7 +1884,7 @@ function getActivatableMonsterEffect(card,pIdx,zoneIdx){
   }
   if(b.fx==='ufo_turtle'){
     return {label:'Tribute: Inflict 400 Damage',activate:()=>{
-      const opp=1-pIdx;
+      const opp=fallbackOpp(pIdx);
       sendToGY(pIdx,card,'mon',zoneIdx,'tribute');
       dealDamage(opp,400);
       log(`${pIdx===ME?'You':'Bot'} tributes ${b.n} to inflict 400 damage!`,pIdx===ME?'me':'opp');
@@ -1888,7 +1895,7 @@ function getActivatableMonsterEffect(card,pIdx,zoneIdx){
 }
 function triggerFlip(pIdx,card,idx){
   const fx=base(card).fx;
-  const opp=1-pIdx;
+  const opp=fallbackOpp(pIdx);
   if(!fx) return;
   if(fx==='draw1'){ drawCard(pIdx); render(); }
   else if(fx==='hane_hane'){
@@ -1932,22 +1939,31 @@ function triggerFlip(pIdx,card,idx){
 
 /* ============================= BATTLE ============================= */
 function beginAttackDeclare(atkIdx){
-  const oppMons=G.players[BOT].mon.some(m=>m);
-  G.selection={type:'attack',stage:'target',attackerIdx:atkIdx,mode: oppMons? 'select':'direct'};
+  const opponents=livingSeats().filter(s=>s!==ME);
+  if(!opponents.length) return; // game should already be over
+  if(opponents.length===1){ startAttackTargetSelect(atkIdx,opponents[0]); return; }
+  showModal('Declare Attack','Attack which player?',
+    opponents.map(s=>({label:`${pName(s)} (${G.health[s]} HP)`,action:()=>startAttackTargetSelect(atkIdx,s)}))
+      .concat([{label:'Cancel',action:()=>{}}]));
+}
+function startAttackTargetSelect(atkIdx,targetPlayer){
+  const oppMons=G.players[targetPlayer].mon.some(m=>m);
+  G.selection={type:'attack',stage:'target',attackerIdx:atkIdx,targetPlayer,mode: oppMons? 'select':'direct'};
   render();
   if(!oppMons){ resolveAttack(atkIdx,-1); }
-  else toast('Choose a target to attack, or the target selector will show valid monsters.');
+  else toast(`Choose a target on ${pName(targetPlayer)}'s field, or the target selector will show valid monsters.`);
 }
 function resolveAttack(atkIdx,targetIdx){
+  const targetPlayer=G.selection && G.selection.targetPlayer;
   G.selection=null;
   const attacker=G.players[ME].mon[atkIdx];
   attacker.attacked=true;
   const isDirect = targetIdx===-1;
-  log(`You attack with ${base(attacker).n}${isDirect? ' directly!' : (' targeting a monster.')}`,'me');
+  log(`You attack ${pName(targetPlayer)}${isDirect? ' directly!' : ' targeting a monster.'} with ${base(attacker).n}.`,'me');
   render();
-  openAttackTrapWindow(ME,BOT,attacker,atkIdx,targetIdx,(cancelled)=>{
+  openAttackTrapWindow(ME,targetPlayer,attacker,atkIdx,targetIdx,(cancelled)=>{
     if(cancelled){ render(); return; }
-    playClashAnimation(ME,BOT,atkIdx,targetIdx,()=>performBattle(ME,BOT,atkIdx,targetIdx));
+    playClashAnimation(ME,targetPlayer,atkIdx,targetIdx,()=>performBattle(ME,targetPlayer,atkIdx,targetIdx));
   });
 }
 function openAttackTrapWindow(attackerSide,defenderSide,attacker,atkIdx,targetIdx,cb){
@@ -1980,7 +1996,7 @@ function openAttackTrapWindow(attackerSide,defenderSide,attacker,atkIdx,targetId
     if(mirage && Math.random()<0.6){ log("Bot's Mirage Dragon negates the attack!",'opp'); const mEl=zoneCardEl(defenderSide,'mon',defP.mon.indexOf(mirage)),aEl=zoneCardEl(attackerSide,'mon',atkIdx); if(mEl&&aEl) playBeam(mEl,aEl,'trap'); cb(true); return; }
     if(eligible.length){
       const pick=eligible[Math.floor(Math.random()*eligible.length)];
-      activateFromField(BOT,pick.i);
+      activateFromField(defenderSide,pick.i);
       resolveTrapVsAttack(pick.fx,attackerSide,defenderSide,attacker,atkIdx,targetIdx,cb,defenderSide,pick.i);
     } else if(kuriboh){ useKuriboh(); }
     else cb(false);
@@ -2091,7 +2107,7 @@ const RESPONSE_ONLY_TRAP_FX=new Set(['trap_hole','torrential_tribute','floodgate
 
 function resolveSpellTrapEffect(pIdx,card,idx){
   const fx=base(card).fx;
-  const opp=1-pIdx;
+  const opp=fallbackOpp(pIdx);
   const self=b=>b===ME?'me':'opp';
   function toGYSelf(){ G.gy.push(card); G.players[pIdx].st[idx]=null; }
   switch(fx){
@@ -2416,22 +2432,31 @@ document.getElementById('decklist-btn').addEventListener('click',()=>{
 function botMainPhase(){
   setTimeout(()=>botStep1(),700);
 }
+// Any living seat other than `actingSeat` with >=2 monsters, chosen at random -- no bias toward
+// the human specifically (a real chooseOpponent()-style human/bot choice lands in Phase D).
+function pickLavaGolemTarget(actingSeat){
+  const eligible=livingSeats().filter(s=>s!==actingSeat && allOwnedMonsters(s).length>=2);
+  if(!eligible.length) return null;
+  return eligible[Math.floor(Math.random()*eligible.length)];
+}
 function botStep1(){
-  const p=G.players[BOT];
+  const acting=G.active;
+  const p=G.players[acting];
   const lgIdx=p.hand.findIndex(c=>base(c).fx==='lava_golem');
-  if(lgIdx>=0 && allOwnedMonsters(ME).length>=2){
+  const lgTarget=lgIdx>=0?pickLavaGolemTarget(acting):null;
+  if(lgTarget!=null){
     const card=p.hand[lgIdx];
-    const tribs=allOwnedMonsters(ME).slice(0,2);
-    tribs.sort((a,b2)=>b2-a).forEach(i=>{ const t=G.players[ME].mon[i]; sendToGY(ME,t,'mon',i,'tribute'); });
+    const tribs=allOwnedMonsters(lgTarget).slice(0,2);
+    tribs.sort((a,b2)=>b2-a).forEach(i=>{ const t=G.players[lgTarget].mon[i]; sendToGY(lgTarget,t,'mon',i,'tribute'); });
     p.hand.splice(lgIdx,1);
-    const z=findEmptyZone(ME,'mon');
-    card.faceDown=false; card.pos='atk'; card.controller=ME; card.zone=z;
+    const z=findEmptyZone(lgTarget,'mon');
+    card.faceDown=false; card.pos='atk'; card.controller=lgTarget; card.zone=z;
     card.summonedTurn=G.turnNum; card.attacked=false; card.equips=[]; card.tempAtk=0;
-    G.players[ME].mon[z]=card;
-    log(`Bot Special Summons Lava Golem to your field!`,'opp');
+    G.players[lgTarget].mon[z]=card;
+    log(`${pName(acting)} Special Summons Lava Golem to ${pName(lgTarget)}'s field!`,acting===ME?'me':'opp');
     SFX.place(); markJustPlaced(card.uid);
     render();
-    afterAnySummon(ME,card,z,false,true);
+    afterAnySummon(lgTarget,card,z,false,true);
   }
   // Play a monster if possible
   if(!p.normalSummonUsed){
@@ -2440,21 +2465,21 @@ function botStep1(){
       const card=p.hand[idx];
       const b=base(card);
       const need=b.l>=7?2:(b.l>=5?1:0);
-      const owned=allOwnedMonsters(BOT);
+      const owned=allOwnedMonsters(acting);
       if(need<=owned.length){
-        const z=findEmptyZone(BOT,'mon');
+        const z=findEmptyZone(acting,'mon');
         if(z>=0){
           const tribs=owned.slice(0,need);
-          tribs.sort((a,b2)=>b2-a).forEach(i=>{ const t=p.mon[i]; sendToGY(BOT,t,'mon',i,'tribute'); });
+          tribs.sort((a,b2)=>b2-a).forEach(i=>{ const t=p.mon[i]; sendToGY(acting,t,'mon',i,'tribute'); });
           p.hand.splice(idx,1);
           const setFaceDown = b.atk<1200 && b.def>=1500;
-          card.faceDown=setFaceDown; card.pos=setFaceDown?'def':'atk'; card.controller=BOT; card.zone=z;
+          card.faceDown=setFaceDown; card.pos=setFaceDown?'def':'atk'; card.controller=acting; card.zone=z;
           card.summonedTurn=G.turnNum; card.attacked=false; card.equips=[]; card.tempAtk=0;
           p.mon[z]=card; p.normalSummonUsed=true;
-          log(`Bot ${setFaceDown?'Sets':'Summons'} a monster in ${setFaceDown?'Defense':'Attack'} Position.`,'opp');
+          log(`${pName(acting)} ${setFaceDown?'Sets':'Summons'} a monster in ${setFaceDown?'Defense':'Attack'} Position.`,acting===ME?'me':'opp');
           SFX.place(); markJustPlaced(card.uid);
           render();
-          if(!setFaceDown) afterSummon(BOT,card,z); else afterAnySummon(BOT,card,z,true);
+          if(!setFaceDown) afterSummon(acting,card,z); else afterAnySummon(acting,card,z,true);
         }
       }
     }
@@ -2462,42 +2487,45 @@ function botStep1(){
   setTimeout(()=>botUseMonsterEffects(),700);
 }
 function botUseMonsterEffects(){
-  const p=G.players[BOT];
+  const acting=G.active;
+  const p=G.players[acting];
   p.mon.forEach((m,i)=>{
     if(!m || m.faceDown) return;
-    const eff=getActivatableMonsterEffect(m,BOT,i);
+    const eff=getActivatableMonsterEffect(m,acting,i);
     if(eff) eff.activate();
   });
   setTimeout(()=>botStep2(),700);
 }
 function botStep2(){
   // Play spells: destructive/advantage ones now, set traps
-  const p=G.players[BOT];
+  const acting=G.active;
+  const p=G.players[acting];
   let played=true, guard=0;
   function tryOne(){
     guard++; if(guard>6) { setTimeout(finishMain,600); return; }
     const idx=p.hand.findIndex(c=>!isMonster(c));
     if(idx<0){ finishMain(); return; }
     const card=p.hand[idx]; const b=base(card);
-    const z=findEmptyZone(BOT,'st');
+    const z=findEmptyZone(acting,'st');
     if(z<0){ finishMain(); return; }
     if(b.cat==='Trap'){
-      p.hand.splice(idx,1); card.faceDown=true; card.controller=BOT; card.zone=z; card.summonedTurn=G.turnNum;
-      p.st[z]=card; log('Bot Sets a card.','opp'); SFX.place(); markJustPlaced(card.uid); render();
+      p.hand.splice(idx,1); card.faceDown=true; card.controller=acting; card.zone=z; card.summonedTurn=G.turnNum;
+      p.st[z]=card; log(`${pName(acting)} Sets a card.`,acting===ME?'me':'opp'); SFX.place(); markJustPlaced(card.uid); render();
       setTimeout(tryOne,500);
     } else {
       const goodNow=['raigeki','dark_hole','fissure','feather_duster','destroy_all_spelltrap','pot_of_greed','monster_reborn','just_desserts'].includes(b.fx);
-      const worthwhile = goodNow && (b.fx!=='raigeki'&&b.fx!=='fissure'&&b.fx!=='just_desserts' ? true : G.players[ME].mon.some(m=>m));
+      const anyOpponentHasMon=livingSeats().some(s=>s!==acting && G.players[s].mon.some(m=>m));
+      const worthwhile = goodNow && (b.fx!=='raigeki'&&b.fx!=='fissure'&&b.fx!=='just_desserts' ? true : anyOpponentHasMon);
       if(worthwhile){
-        p.hand.splice(idx,1); card.faceDown=false; card.controller=BOT; card.zone=z; card.summonedTurn=G.turnNum;
-        p.st[z]=card; log(`Bot activates ${b.n}.`,'opp'); SFX.activate(); markJustPlaced(card.uid); render();
-        resolveSpellTrapEffect(BOT,card,z);
+        p.hand.splice(idx,1); card.faceDown=false; card.controller=acting; card.zone=z; card.summonedTurn=G.turnNum;
+        p.st[z]=card; log(`${pName(acting)} activates ${b.n}.`,acting===ME?'me':'opp'); SFX.activate(); markJustPlaced(card.uid); render();
+        resolveSpellTrapEffect(acting,card,z);
         setTimeout(tryOne,700);
       } else if(b.sub==='Equip'){
         finishMain();
       } else {
-        p.hand.splice(idx,1); card.faceDown=true; card.controller=BOT; card.zone=z; card.summonedTurn=G.turnNum;
-        p.st[z]=card; log('Bot Sets a card.','opp'); SFX.place(); markJustPlaced(card.uid); render();
+        p.hand.splice(idx,1); card.faceDown=true; card.controller=acting; card.zone=z; card.summonedTurn=G.turnNum;
+        p.st[z]=card; log(`${pName(acting)} Sets a card.`,acting===ME?'me':'opp'); SFX.place(); markJustPlaced(card.uid); render();
         setTimeout(tryOne,500);
       }
     }
@@ -2512,30 +2540,44 @@ function botBattlePhase(){
   setTimeout(()=>botAttackStep(0),700);
 }
 function botAttackStep(fromIdx){
-  const p=G.players[BOT];
+  const acting=G.active;
+  const p=G.players[acting];
   for(let i=fromIdx;i<4;i++){
     const m=p.mon[i];
     if(m && !m.faceDown && m.pos==='atk' && !m.attacked){
-      const myMons=allOwnedMonsters(ME);
-      let targetIdx=-1;
-      if(myMons.length){
-        // attack weakest defender it can beat, else strongest attacker if it wins, else skip
-        let best=-1,bestScore=-Infinity;
-        myMons.forEach(ti=>{
-          const t=G.players[ME].mon[ti];
-          const tStrength = t.pos==='atk'? effAtk(t) : effDef(t);
-          const score = effAtk(m)-tStrength;
-          if(score>bestScore){bestScore=score; best=ti;}
-        });
-        if(bestScore>=0) targetIdx=best; else { botAttackStep(i+1); return; }
-      }
+      // Evaluate every living opponent independently: if they have monsters, the best trade
+      // available against their field; if they have none, a direct attack. Collect every option
+      // tied for the best score and pick randomly among them -- opponents are always iterated in
+      // ascending seat order, and the human is always seat 0, so breaking ties by "first found"
+      // would silently favor attacking the human every time two options are equally good.
+      const opponents=livingSeats().filter(s=>s!==acting);
+      let bestScore=-Infinity, options=[];
+      opponents.forEach(opp=>{
+        const oppMons=allOwnedMonsters(opp);
+        if(oppMons.length){
+          oppMons.forEach(ti=>{
+            const t=G.players[opp].mon[ti];
+            const tStrength = t.pos==='atk'? effAtk(t) : effDef(t);
+            const score = effAtk(m)-tStrength;
+            if(score>bestScore){bestScore=score; options=[{opp,target:ti}];}
+            else if(score===bestScore){options.push({opp,target:ti});}
+          });
+        } else {
+          const score=effAtk(m);
+          if(score>bestScore){bestScore=score; options=[{opp,target:-1}];}
+          else if(score===bestScore){options.push({opp,target:-1});}
+        }
+      });
+      if(!options.length || bestScore<0){ botAttackStep(i+1); return; }
+      const pick=options[Math.floor(Math.random()*options.length)];
+      const bestOpp=pick.opp, bestTarget=pick.target;
       m.attacked=true;
-      log(`Bot attacks with ${base(m).n}${targetIdx===-1?' directly!':'.'}`,'opp');
+      log(`${pName(acting)} attacks ${pName(bestOpp)}${bestTarget===-1?' directly':''} with ${base(m).n}${bestTarget===-1?'!':'.'}`,acting===ME?'me':'opp');
       render();
-      openAttackTrapWindow(BOT,ME,m,i,targetIdx,(cancelled)=>{
+      openAttackTrapWindow(acting,bestOpp,m,i,bestTarget,(cancelled)=>{
         if(cancelled){ setTimeout(()=>botAttackStep(i+1),700); return; }
-        playClashAnimation(BOT,ME,i,targetIdx,()=>{
-          performBattle(BOT,ME,i,targetIdx);
+        playClashAnimation(acting,bestOpp,i,bestTarget,()=>{
+          performBattle(acting,bestOpp,i,bestTarget);
           setTimeout(()=>botAttackStep(i+1),700);
         });
       });
