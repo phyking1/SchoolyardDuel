@@ -51,17 +51,18 @@ button{font-family:inherit;cursor:pointer;}
 #recache-btn:disabled{opacity:.6;}
 
 /* ---------- BOARD ---------- */
-#game-root{display:none;position:relative;min-height:100vh;min-height:100dvh;background:
+#game-root{display:none;position:relative;height:100vh;height:100dvh;background:
   radial-gradient(ellipse 100% 60% at 50% 0%,rgba(139,0,0,.65),transparent 60%),
   radial-gradient(ellipse 100% 60% at 50% 100%,rgba(0,102,255,.6),transparent 60%),
   #030304;
-  flex-direction:column;align-items:stretch;
-  justify-content:center;justify-content:safe center;}
-#game-root.table-mode{justify-content:flex-start;}
-#board-wrap{position:relative;display:flex;margin:auto 0;}
-#board-wrap.table-mode{margin:0;flex:1 1 auto;min-height:0;}
-#board{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;
-  padding:4px 6px 38px;gap:clamp(2px,.8vw,8px);min-width:0;}
+  flex-direction:column;align-items:stretch;justify-content:flex-start;overflow:hidden;}
+#board-wrap{position:relative;display:flex;flex:1 1 auto;min-height:0;}
+/* #board always fills exactly the space left after the fixed bottom log-drawer handle (see the
+   padding-bottom below), in both List and Table View -- never centered-then-possibly-taller-than-
+   viewport. If its own content still doesn't fit (a full 4P List View stack on a short phone), it
+   scrolls internally instead of pushing real content behind that fixed handle. */
+#board{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;justify-content:safe center;
+  padding:4px 6px 48px;gap:clamp(2px,.8vw,8px);min-width:0;min-height:0;overflow-y:auto;}
 
 /* health rails: dock health bars to the left/right edges instead of full-width rows */
 .hp-rail{flex:0 0 auto;width:clamp(30px,8vw,52px);display:flex;flex-direction:column;
@@ -130,7 +131,7 @@ button{font-family:inherit;cursor:pointer;}
 #board.table-mode #table-view-top,#board.table-mode #table-view-bottom{display:block;}
 #board.table-mode #opp-stack,#board.table-mode #mon-me,#board.table-mode #st-me,
 #board.table-mode #hand-me{display:none;}
-#board.table-mode{touch-action:pan-y;justify-content:flex-start;}
+#board.table-mode{touch-action:pan-y;}
 
 /* List View (any player count): health lives in a horizontal bar under your own board instead of
    a side rail -- matching how every opponent panel already shows health. Table View has its own
@@ -571,7 +572,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v42';
+const GAME_VERSION='v43';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
