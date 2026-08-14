@@ -33,7 +33,7 @@ button{font-family:inherit;cursor:pointer;}
   text-shadow:0 2px 8px rgba(0,0,0,.85),0 0 3px rgba(0,0,0,.7);}
 #setup-wrap{display:flex;flex-direction:column;align-items:center;gap:14px;
   background:rgba(6,15,10,.42);border:1px solid rgba(217,180,90,.4);border-radius:18px;
-  padding:22px 18px 24px;backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+  padding:22px 18px 24px;backdrop-filter:blur(1px);-webkit-backdrop-filter:blur(1px);
   box-shadow:0 12px 34px rgba(0,0,0,.55);max-width:min(94vw,440px);width:100%;}
 .health-choice{display:flex;flex-wrap:wrap;gap:12px;justify-content:center;width:100%;}
 .health-btn{background:var(--panel2);border:2px solid var(--gold-dim);color:var(--ink);
@@ -585,7 +585,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v45';
+const GAME_VERSION='v46';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
