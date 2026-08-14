@@ -598,7 +598,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v48';
+const GAME_VERSION='v49';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1894,13 +1894,13 @@ function onZoneCardClick(pIdx,type,idx){
     if(b.cat==='Trap' && (b.sub==='Counter' || RESPONSE_ONLY_TRAP_FX.has(b.fx))){ toast('This Trap can only be activated in response to something.'); return; }
     if(b.cat==='Spell'){
       showModal(b.n,'Activate this Spell Card?',[
-        {label:'Activate',action:()=>activateFromField(ME,idx,()=>offerDarkBribeResponse(ME,card,idx,()=>resolveSpellTrapEffect(ME,card,idx)))},
-        {label:'Cancel',action:()=>{}},
+        {label:'Activate',card,action:()=>activateFromField(ME,idx,()=>offerDarkBribeResponse(ME,card,idx,()=>resolveSpellTrapEffect(ME,card,idx)))},
+        {label:'Cancel',card,action:()=>{}},
       ]);
     } else {
       showModal(b.n,'Activate this Trap Card?',[
-        {label:'Activate',action:()=>activateFromField(ME,idx,()=>offerDarkBribeResponse(ME,card,idx,()=>resolveSpellTrapEffect(ME,card,idx)))},
-        {label:'Cancel',action:()=>{}},
+        {label:'Activate',card,action:()=>activateFromField(ME,idx,()=>offerDarkBribeResponse(ME,card,idx,()=>resolveSpellTrapEffect(ME,card,idx)))},
+        {label:'Cancel',card,action:()=>{}},
       ]);
     }
   }
@@ -2549,7 +2549,10 @@ function resolveEachPlayerPassLeft(pIdx,card,idx,bonusAtk){
 }
 function offerTrapActivation(pIdx,idx,card,onYes){
   if(pIdx===ME){
-    showModal(base(card).n,'Activate this Trap?',[{label:'Activate',action:()=>{ card.faceDown=false; render(); onYes(); }},{label:'Skip',action:()=>{}}]);
+    showModal(base(card).n,'Activate this Trap?',[
+      {label:'Activate',card,action:()=>{ card.faceDown=false; render(); onYes(); }},
+      {label:'Skip',card,action:()=>{}},
+    ]);
   } else { card.faceDown=false; render(); onYes(); }
 }
 
