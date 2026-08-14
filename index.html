@@ -148,6 +148,17 @@ button{font-family:inherit;cursor:pointer;}
    own board area already has no box around it either. */
 #board.two-player-mode .opp-panel.active-turn{box-shadow:none;}
 #board.two-player-mode .opp-panel{border:none;background:none;}
+/* 2P has meaningfully more room to spare than the shared .zone/.card/.hand-row sizing assumes --
+   that sizing has to also work for a cramped 3-4P stack, capping well short of what a single-
+   opponent board could actually use. Measured ~175px of unclaimed width and ~200px of unclaimed
+   height in 2P at the design resolution (852px tall, #hp-rail-me already hidden in List View) --
+   sized up ~1.35x from the shared base, keeping the same aspect ratio, then confirmed via
+   #board.scrollHeight that it still fits with room to spare rather than needing the overflow
+   fallback #board's own comment describes for a cramped stack. */
+#board.two-player-mode .zone{width:clamp(51px,17.5cqw,86px);height:clamp(82px,27cqw,132px);}
+#board.two-player-mode .card{width:clamp(49px,16.7cqw,81px);height:clamp(78px,27cqw,127px);}
+#board.two-player-mode .zone-row{gap:clamp(5px,2.2cqw,11px);}
+#board.two-player-mode .hand-row{gap:clamp(4px,1.6cqw,8px);}
 .opp-panel-header{display:flex;align-items:center;gap:6px;padding:0 2px;}
 .opp-panel-name{font-size:clamp(.55em,1.8cqw,.72em);font-weight:800;color:var(--gold);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto;max-width:22cqw;}
@@ -932,7 +943,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v68';
+const GAME_VERSION='v69';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
