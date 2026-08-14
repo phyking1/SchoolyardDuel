@@ -1,7 +1,18 @@
 # Schoolyard Duel
 
 A single-file Yu-Gi-Oh-style card duel game. The entire game lives in `index.html`
-(card database, game state, bot AI, rendering — all client-side, no server).
+(card database, game state, bot AI, rendering — all client-side).
+
+## Online multiplayer
+
+`server/` is a Cloudflare Worker + Durable Object relay for room-name-based online play (see
+`server/README.md`). It's a thin, game-agnostic WebSocket relay only — it never inspects game
+content. `index.html`'s host client is the sole source of truth for a networked game: it runs the
+same game logic as local vs-bots play and broadcasts the full state after every render(); other
+connected seats are thin renderers that dispatch their own actions back to the host instead of
+mutating state directly (see the "ONLINE MULTIPLAYER" section near the top of the `<script>`
+block, and `ONLINE_ACTION_FNS`/`dispatchAction()`). `RELAY_WS_BASE` currently points at a local
+`wrangler dev` server -- update it once the Worker is actually deployed.
 
 ## Versioning
 

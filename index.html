@@ -51,6 +51,25 @@ button{font-family:inherit;cursor:pointer;}
   box-shadow:0 4px 0 #6b551f;}
 #start-btn:disabled{opacity:.4;cursor:not-allowed;}
 #start-btn:active{transform:translateY(3px);box-shadow:0 1px 0 #6b551f;}
+.mode-tabs{display:flex;gap:8px;justify-content:center;}
+.mode-tab{background:var(--panel2);border:1px solid var(--gold-dim);color:var(--dim);
+  padding:8px 20px;border-radius:20px;font-size:.9em;font-weight:700;transition:.15s;}
+.mode-tab:hover{border-color:var(--gold);color:var(--ink);}
+.mode-tab.sel{border-color:var(--gold);background:#1c2c1e;color:var(--gold);
+  box-shadow:0 0 14px rgba(217,180,90,.3);}
+#online-join-row{display:flex;gap:8px;justify-content:center;flex-wrap:wrap;}
+#room-name-input{background:var(--panel2);border:2px solid var(--gold-dim);color:var(--ink);
+  padding:12px 14px;border-radius:10px;font-size:1em;width:180px;max-width:60vw;}
+#room-name-input:focus{outline:none;border-color:var(--gold);}
+#online-connect-btn{background:linear-gradient(180deg,var(--gold),#a9853c);color:#1a1205;
+  border:none;padding:0 20px;border-radius:8px;font-weight:700;}
+#online-status{display:flex;flex-direction:column;align-items:center;}
+#online-start-btn{background:linear-gradient(180deg,var(--gold),#a9853c);color:#1a1205;
+  border:none;padding:12px 32px;border-radius:8px;font-size:1.05em;font-weight:700;margin-bottom:10px;}
+#online-start-btn:disabled{opacity:.4;cursor:not-allowed;}
+#online-cancel-btn{background:#16281c;border:1px solid var(--danger);color:var(--danger);
+  padding:8px 18px;border-radius:8px;font-size:.85em;}
+#online-cancel-btn:hover{background:#2a1416;}
 #coin-flip-wrap{display:none;flex-direction:column;align-items:center;gap:14px;}
 .die1{width:70px;height:70px;border-radius:14px;background:linear-gradient(160deg,#fff,#c9c9c9);
   color:#111;font-size:2em;font-weight:800;display:flex;align-items:center;justify-content:center;
@@ -504,13 +523,32 @@ button{font-family:inherit;cursor:pointer;}
       <div class="health-btn" data-hp="8000">8000 Health<br><small style="color:var(--dim)">Standard Duel</small></div>
     </div>
     <div style="height:14px"></div>
-    <div class="health-choice">
-      <div class="health-btn sel" data-players="2">2 Players<br><small style="color:var(--dim)">You vs 1 Bot</small></div>
-      <div class="health-btn" data-players="3">3 Players<br><small style="color:var(--dim)">You vs 2 Bots</small></div>
-      <div class="health-btn" data-players="4">4 Players<br><small style="color:var(--dim)">You vs 3 Bots</small></div>
+    <div class="mode-tabs">
+      <button type="button" class="mode-tab sel" data-mode="bots">Vs Bots</button>
+      <button type="button" class="mode-tab" data-mode="online">Online</button>
     </div>
-    <div style="height:22px"></div>
-    <button id="start-btn">Begin Duel</button>
+    <div style="height:14px"></div>
+    <div id="bot-setup">
+      <div class="health-choice">
+        <div class="health-btn sel" data-players="2">2 Players<br><small style="color:var(--dim)">You vs 1 Bot</small></div>
+        <div class="health-btn" data-players="3">3 Players<br><small style="color:var(--dim)">You vs 2 Bots</small></div>
+        <div class="health-btn" data-players="4">4 Players<br><small style="color:var(--dim)">You vs 3 Bots</small></div>
+      </div>
+      <div style="height:22px"></div>
+      <button id="start-btn">Begin Duel</button>
+    </div>
+    <div id="online-setup" style="display:none">
+      <div id="online-join-row">
+        <input type="text" id="room-name-input" placeholder="Room name" autocomplete="off" maxlength="64">
+        <button id="online-connect-btn" type="button">Connect</button>
+      </div>
+      <div id="online-status" style="display:none">
+        <p class="sub" id="online-status-text" style="margin:8px 0"></p>
+        <button id="online-start-btn" type="button" style="display:none">Start Duel</button>
+        <button id="online-cancel-btn" type="button">Leave Room</button>
+      </div>
+    </div>
+    <div style="height:10px"></div>
     <button id="recache-btn" type="button">↻ Force Refresh</button>
   </div>
   <div id="coin-flip-wrap">
@@ -643,7 +681,121 @@ function toFrameRect(realRect){
     height:realRect.height/currentFrameScale,
   };
 }
-const GAME_VERSION='v53';
+/* ============================= ONLINE MULTIPLAYER (relay networking) ============================= */
+// The relay is a game-agnostic Cloudflare Worker + Durable Object (see server/): whoever connects
+// to a room name first becomes seat 0 (the "host"); the host is the ONLY client that runs real
+// game logic (identical to local vs-bots play, just with no bots) -- it broadcasts the full G
+// state after every render(), and every other connected seat is a thin renderer of whatever it
+// last received. Swap RELAY_WS_BASE for the deployed Worker URL once one exists (see
+// server/README.md) -- this points at a local `wrangler dev` server for now.
+const RELAY_WS_BASE='ws://localhost:8787/room';
+let onlineMode=false, onlineIsHost=false, onlineSocket=null, onlineSeatsTaken=[];
+function connectOnlineRoom(roomName,onWelcome){
+  if(onlineSocket){ try{ onlineSocket.close(); }catch{} }
+  const socket=new WebSocket(`${RELAY_WS_BASE}?name=${encodeURIComponent(roomName)}`);
+  onlineSocket=socket;
+  socket.addEventListener('message',(evt)=>{
+    let msg; try{ msg=JSON.parse(evt.data); }catch{ return; }
+    if(msg.type==='welcome'){
+      onlineMode=true; ME=msg.seat; onlineIsHost=(msg.seat===0); onlineSeatsTaken=msg.seatsTaken;
+      onWelcome(msg);
+    } else if(msg.type==='peer-joined'){
+      if(!onlineSeatsTaken.includes(msg.seat)) onlineSeatsTaken.push(msg.seat);
+      onOnlineRosterChange();
+    } else if(msg.type==='peer-left'){
+      onlineSeatsTaken=onlineSeatsTaken.filter(s=>s!==msg.seat);
+      onOnlineRosterChange();
+    } else if(msg.type==='relay'){
+      receiveOnlineRelay(msg.from,msg.payload);
+    }
+  });
+  socket.addEventListener('close',()=>{ if(onlineMode) onOnlineDisconnected(); });
+}
+function sendOnlineRelay(payload){
+  if(!onlineSocket || onlineSocket.readyState!==WebSocket.OPEN) return;
+  onlineSocket.send(JSON.stringify({type:'relay',payload}));
+}
+function leaveOnlineRoom(){
+  if(onlineSocket){ try{ onlineSocket.close(); }catch{} onlineSocket=null; }
+  onlineMode=false; onlineIsHost=false; onlineSeatsTaken=[]; ME=0;
+}
+function broadcastOnlineStateIfHost(){
+  if(!onlineMode || !onlineIsHost) return;
+  sendOnlineRelay({kind:'state',G});
+}
+// Whitelisted "top-level input" functions a guest's own action dispatches through instead of
+// mutating G directly (see dispatchAction()). Each one already exists as an ordinary local click
+// handler -- nothing about their own logic changes; the host just calls them in response to a
+// network message describing a remote seat's action instead of a local DOM event.
+const ONLINE_ACTION_FNS={
+  drawPhaseClick:(seat)=>drawPhaseClick(seat),
+  advancePhaseForSeat:(seat)=>advancePhaseForSeat(seat),
+};
+function dispatchAction(fnName,...args){
+  if(onlineMode && !onlineIsHost){ sendOnlineRelay({kind:'action',fnName,args}); return; }
+  const fn=ONLINE_ACTION_FNS[fnName];
+  if(fn) fn(...args);
+}
+function receiveOnlineRelay(fromSeat,payload){
+  if(!payload) return;
+  if(payload.kind==='state' && !onlineIsHost){
+    // #game-root's display:none comes from the stylesheet, not an inline style, so .style.display
+    // reads as '' (not 'none') until something explicitly sets it -- check for the positive
+    // "has been shown" state instead of the (never-true-until-set) negative.
+    const alreadyStarted=document.getElementById('game-root').style.display==='flex';
+    G=payload.G;
+    if(!alreadyStarted){
+      // beginDuel() itself calls render() more than once while it's still mid-setup (e.g.
+      // switchViewMode()'s own internal render()), before G.turnNum is even assigned -- a
+      // broadcast caught at that point has no real game state to show yet, so there's nothing
+      // to render and no DOM to build for it. Wait for the first snapshot that actually reflects
+      // a started duel.
+      if(!(G.turnNum>0)) return;
+      // Mirrors the DOM-building side effects beginDuel() normally does -- the guest never calls
+      // beginDuel() itself (only the host runs real game logic), so its first real snapshot needs
+      // to trigger them here instead, before the very first render() has anything to draw into.
+      document.getElementById('start-screen').style.display='none';
+      document.getElementById('game-root').style.display='flex';
+      document.getElementById('viewlog-btn').style.display='flex';
+      document.getElementById('exitgame-btn').style.display='flex';
+      document.getElementById('board').classList.toggle('two-player-mode',G.numPlayers===2);
+      document.getElementById('board-wrap').classList.toggle('two-player-mode',G.numPlayers===2);
+      buildOpponentPanels();
+      buildTableView();
+      switchViewMode(G.numPlayers>=3 ? 'table' : 'list');
+    }
+    render();
+  } else if(payload.kind==='action' && onlineIsHost){
+    const fn=ONLINE_ACTION_FNS[payload.fnName];
+    if(fn) fn(...payload.args);
+  }
+  onOnlineRelayForRoomUI(fromSeat,payload);
+}
+// Placeholders overridden by the start-screen room UI once its DOM exists (defined further down,
+// alongside the rest of the setup-flow code) -- declared here as no-ops so the networking code
+// above never has to null-check them. A later `function` declaration with the same name simply
+// replaces the binding, same as any other function redeclaration in this file.
+function onOnlineRosterChange(){}
+function onOnlineDisconnected(){}
+function onOnlineRelayForRoomUI(){}
+function pickFirstPlayerInstant(numPlayers){
+  let candidates=Array.from({length:numPlayers},(_,i)=>i);
+  for(;;){
+    const rolls=candidates.map(()=>1+Math.floor(Math.random()*6));
+    const maxRoll=Math.max(...rolls);
+    const winners=candidates.filter((seat,i)=>rolls[i]===maxRoll);
+    if(winners.length===1) return winners[0];
+    candidates=winners;
+  }
+}
+function beginOnlineDuel(){
+  if(!onlineIsHost) return;
+  G.numPlayers=onlineSeatsTaken.length;
+  G.first=pickFirstPlayerInstant(G.numPlayers);
+  beginDuel();
+}
+
+const GAME_VERSION='v54';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -761,7 +913,9 @@ SPELLTRAP_DB.forEach(c=>DB[c.id]=c);
 
 /* ============================= GAME STATE ============================= */
 let uidc=1;
-const G={
+// `let`, not `const`: an online guest replaces this whole object wholesale with whatever
+// authoritative snapshot the host broadcasts (see receiveOnlineState() near the networking code).
+let G={
   startHealth:8000,
   numPlayers:2, // 2-4; seats beyond ME(=0) are bots. Rebuilt by beginDuel() to match.
   viewMode:'list', // 'list' (stacked opponent panels) or 'table' (spatial seating, pan to view)
@@ -781,7 +935,12 @@ const G={
   isBot:[false,true],
   log:[],
 };
-const ME=0, BOT=1;
+// `let`, not `const`: in online play, ME becomes whichever seat the relay server assigned THIS
+// particular browser tab (set in connectOnlineRoom()'s 'welcome' handler, near the networking
+// code) instead of always 0.
+let ME=0;
+const BOT=1; // unused by game logic itself (dead even before online play) -- kept only because
+             // several existing pwtest/*.js regression scripts reference it directly.
 const justPlacedSet=new Set();
 
 /* ============================= SFX (synthesized, no asset files) ============================= */
@@ -893,7 +1052,7 @@ function buildDeck(){
 function log(msg,cls){G.log.push({msg,cls:cls||'sys'});renderLog();}
 function base(card){return DB[card.baseId];}
 function isMonster(card){return base(card).cat==='Monster';}
-function pName(pIdx){ return pIdx===ME ? 'You' : 'Bot '+pIdx; }
+function pName(pIdx){ return pIdx===ME ? 'You' : (onlineMode ? 'Player '+pIdx : 'Bot '+pIdx); }
 // Next living seat clockwise from `idx` (wraps around); returns idx itself if nobody else is alive.
 function nextAliveSeat(idx){
   for(let step=1;step<=G.numPlayers;step++){
@@ -916,6 +1075,54 @@ document.querySelectorAll('.health-btn').forEach(b=>{
   });
 });
 document.getElementById('start-btn').addEventListener('click',startCoinFlip);
+
+document.querySelectorAll('.mode-tab').forEach(tab=>{
+  tab.addEventListener('click',()=>{
+    document.querySelectorAll('.mode-tab').forEach(t=>t.classList.remove('sel'));
+    tab.classList.add('sel');
+    const isOnline=tab.dataset.mode==='online';
+    document.getElementById('bot-setup').style.display=isOnline?'none':'block';
+    document.getElementById('online-setup').style.display=isOnline?'block':'none';
+  });
+});
+document.getElementById('online-connect-btn').addEventListener('click',()=>{
+  const roomName=document.getElementById('room-name-input').value.trim();
+  if(!roomName){ toast('Enter a room name first.'); return; }
+  document.getElementById('online-connect-btn').disabled=true;
+  document.getElementById('online-join-row').style.display='none';
+  const statusWrap=document.getElementById('online-status');
+  document.getElementById('online-status-text').textContent='Connecting…';
+  statusWrap.style.display='flex';
+  connectOnlineRoom(roomName,()=>updateOnlineStatusUI());
+});
+function updateOnlineStatusUI(){
+  const statusText=document.getElementById('online-status-text');
+  const startBtn=document.getElementById('online-start-btn');
+  const count=onlineSeatsTaken.length;
+  if(onlineIsHost){
+    statusText.textContent = count<2
+      ? `Room ready — waiting for someone to join… (${count}/4 connected)`
+      : `${count} players connected. Start when ready.`;
+    startBtn.style.display='block';
+    startBtn.disabled=count<2;
+  } else {
+    statusText.textContent=`Joined! Waiting for the host to start… (${count}/4 connected)`;
+    startBtn.style.display='none';
+  }
+}
+onOnlineRosterChange=updateOnlineStatusUI;
+onOnlineDisconnected=()=>{ toast('Disconnected from room.'); resetOnlineSetupUI(); };
+document.getElementById('online-start-btn').addEventListener('click',beginOnlineDuel);
+document.getElementById('online-cancel-btn').addEventListener('click',()=>{
+  leaveOnlineRoom();
+  resetOnlineSetupUI();
+});
+function resetOnlineSetupUI(){
+  document.getElementById('online-connect-btn').disabled=false;
+  document.getElementById('online-join-row').style.display='flex';
+  document.getElementById('online-status').style.display='none';
+  document.getElementById('room-name-input').value='';
+}
 
 function startCoinFlip(){
   document.getElementById('setup-wrap').style.display='none';
@@ -1062,7 +1269,7 @@ function beginDuel(){
   document.getElementById('board-wrap').classList.toggle('two-player-mode',G.numPlayers===2);
   G.health=Array(G.numPlayers).fill(G.startHealth);
   G.noBattleDamage=Array(G.numPlayers).fill(false);
-  G.isBot=Array.from({length:G.numPlayers},(_,i)=>i!==ME);
+  G.isBot=onlineMode ? Array(G.numPlayers).fill(false) : Array.from({length:G.numPlayers},(_,i)=>i!==ME);
   G.deck=buildDeck();
   G.gy=[];
   G.players=Array.from({length:G.numPlayers},()=>(
@@ -1145,6 +1352,14 @@ function advancePhase(){
   if(idx>=order.length){ endTurn(); return; }
   goPhase(order[idx]);
 }
+// Parameterized so the action-button handlers can route through dispatchAction() for online play
+// (pIdx=ME locally, or a remote seat when the host applies an incoming network action) instead of
+// calling advancePhase() directly.
+function advancePhaseForSeat(pIdx){
+  if(G.active!==pIdx) return;
+  G.selection=null;
+  advancePhase();
+}
 
 function doDrawPhase(){
   if(skipsDrawFirstTurn(G.active)){
@@ -1152,15 +1367,20 @@ function doDrawPhase(){
     setTimeout(advancePhase, G.active!==ME?500:0);
     return;
   }
-  if(G.active===ME){
-    render(); // shows arrow, waits for click on deck
+  if(G.active===ME || onlineMode){
+    // Online: every seat is a real remote human, not a bot -- even on the host's own client,
+    // a non-ME active seat just means "wait for that player's own drawPhaseClick to arrive over
+    // the network" instead of auto-drawing for them the way a local bot would.
+    render(); // shows arrow (for ME) or just waits; the active player's own client shows the arrow
   } else {
     setTimeout(()=>{ drawCard(G.active); render(); setTimeout(advancePhase,600); },600);
   }
 }
-function humanDrawClick(){
-  if(G.phase!=='draw'||G.active!==ME) return;
-  drawCard(ME);
+// Parameterized so it can be called either from a local click (pIdx=ME) or, on the host, in
+// response to a network action message describing a remote seat's own deck-pile click.
+function drawPhaseClick(pIdx){
+  if(G.phase!=='draw'||G.active!==pIdx) return;
+  drawCard(pIdx);
   render();
   setTimeout(advancePhase,400);
 }
@@ -1239,11 +1459,13 @@ function effDef(card){
 
 function doMainPhase(){
   render();
-  if(G.active!==ME) botMainPhase();
+  // Online: a non-ME active seat is a real remote human, not a bot -- just wait for their own
+  // action-button click (advancePhaseForSeat) or card plays to arrive over the network.
+  if(G.active!==ME && !onlineMode) botMainPhase();
 }
 function doBattlePhase(){
   render();
-  if(G.active!==ME) botBattlePhase();
+  if(G.active!==ME && !onlineMode) botBattlePhase();
 }
 function doEndPhase(){
   G.attrMod=null; // dice effect expires (a fresh one rolls next standby)
@@ -1665,6 +1887,7 @@ function render(){
     deckPile.appendChild(ar);
   }
   syncRailHeights();
+  broadcastOnlineStateIfHost();
 }
 // #game-frame's fixed-resolution + outer-scale architecture (see applyFrameScale() near the top
 // of this script) makes the board's internal available space fully deterministic regardless of
@@ -1701,21 +1924,24 @@ function renderActionButtons(){
   if(G.phase==='main1'||G.phase==='main2'){
     const toBattle=document.createElement('button'); toBattle.className='abtn primary';
     toBattle.textContent = G.phase==='main1' ? (skipsBattleFirstTurn(ME)? 'Go to Main 2 ▶':'Go to Battle Phase ▶') : 'End Turn ▶';
-    toBattle.onclick=()=>{ if(G.selection){G.selection=null; render();} advancePhase(); };
+    toBattle.onclick=()=>{ dispatchAction('advancePhaseForSeat',ME); };
     el.appendChild(toBattle);
   }
   if(G.phase==='battle'){
     const toM2=document.createElement('button'); toM2.className='abtn primary';
     toM2.textContent='Go to Main Phase 2 ▶';
     toM2.onclick=()=>{
+      // hasUnusedAttacker is read-only, so it's safe to check against this client's own (possibly
+      // guest-side, host-broadcast) copy of G purely to decide whether to show the confirmation --
+      // only the eventual "yes" actually needs to reach the host.
       const hasUnusedAttacker=G.players[ME].mon.some(m=>m && !m.faceDown && m.pos==='atk' && !m.attacked);
       if(hasUnusedAttacker){
         showModal('End Battle Phase?','You have an Attack Position monster that hasn\'t attacked yet. Are you sure you want to move on?',[
-          {label:'Yes, Move On',action:()=>{ G.selection=null; advancePhase(); }},
+          {label:'Yes, Move On',action:()=>dispatchAction('advancePhaseForSeat',ME)},
           {label:'Cancel',action:()=>{}},
         ]);
       } else {
-        G.selection=null; advancePhase();
+        dispatchAction('advancePhaseForSeat',ME);
       }
     };
     el.appendChild(toM2);
@@ -1728,7 +1954,7 @@ function renderActionButtons(){
 }
 
 /* ============================= PLAYER INTERACTION ============================= */
-document.getElementById('pile-deck').addEventListener('click',humanDrawClick);
+document.getElementById('pile-deck').addEventListener('click',()=>dispatchAction('drawPhaseClick',ME));
 document.getElementById('pile-gy').addEventListener('click',()=>{
   showGYModal();
 });
