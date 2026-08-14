@@ -61,7 +61,7 @@ button{font-family:inherit;cursor:pointer;}
 #board-wrap{position:relative;display:flex;margin:auto 0;}
 #board-wrap.table-mode{margin:0;flex:1 1 auto;min-height:0;}
 #board{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;
-  padding:4px 6px;gap:clamp(2px,.8vw,8px);min-width:0;}
+  padding:4px 6px 38px;gap:clamp(2px,.8vw,8px);min-width:0;}
 
 /* health rails: dock health bars to the left/right edges instead of full-width rows */
 .hp-rail{flex:0 0 auto;width:clamp(30px,8vw,52px);display:flex;flex-direction:column;
@@ -94,7 +94,7 @@ button{font-family:inherit;cursor:pointer;}
 .zone-row.compact{gap:clamp(2px,1vw,5px);}
 .zone-row.compact .zone{width:clamp(24px,8vw,40px);height:clamp(38px,12.6vw,62px);}
 .hand-row.compact{min-height:clamp(28px,8vw,44px);gap:clamp(2px,.8vw,4px);}
-.hand-row.compact .card{transform:scale(.62);transform-origin:top center;margin:0 -8px;}
+.hand-row.compact .card{width:clamp(22px,7.7vw,37px);height:clamp(36px,12.4vw,58px);}
 
 /* stacked opponent panels: one per living seat other than the human, all visible simultaneously */
 #opp-stack{display:flex;flex-direction:column;gap:6px;padding:2px 0;}
@@ -130,14 +130,16 @@ button{font-family:inherit;cursor:pointer;}
 #board.table-mode #table-view-top,#board.table-mode #table-view-bottom{display:block;}
 #board.table-mode #opp-stack,#board.table-mode #mon-me,#board.table-mode #st-me,
 #board.table-mode #hand-me{display:none;}
-#board-wrap.table-mode #hp-rail-me{display:none;}
-#board.table-mode{touch-action:pan-y;justify-content:flex-start;padding-bottom:38px;}
+#board.table-mode{touch-action:pan-y;justify-content:flex-start;}
 
-/* 2-player mode: health lives in a horizontal bar under your own board instead of a side rail,
-   and there's nothing useful to pan to, so the List/Table View toggle is hidden entirely. */
-#hp-bar-me-bottom{display:none;}
-#board.two-player-mode #hp-bar-me-bottom{display:flex;margin-top:2px;}
-#board-wrap.two-player-mode #hp-rail-me{display:none;}
+/* List View (any player count): health lives in a horizontal bar under your own board instead of
+   a side rail -- matching how every opponent panel already shows health. Table View has its own
+   health display built into the "You" panel, so the side rail and this bar are both irrelevant
+   there. 2-player mode additionally hides the List/Table View toggle -- there's nothing useful to
+   pan to with only one opponent. */
+#hp-rail-me{display:none;}
+#hp-bar-me-bottom{display:flex;margin-top:2px;}
+#board.table-mode #hp-bar-me-bottom{display:none;}
 #board.two-player-mode #view-toggle-row{display:none;}
 #table-view-top,#table-view-bottom{flex:1 1 0;min-height:150px;overflow:hidden;}
 #table-scroll-top,#table-scroll-bottom{display:flex;overflow-x:hidden;touch-action:none;
@@ -147,6 +149,9 @@ button{font-family:inherit;cursor:pointer;}
   display:flex;align-items:stretch;justify-content:center;height:100%;}
 .table-scene .opp-panel{width:100%;max-width:340px;min-height:0;overflow:hidden;justify-content:center;}
 .table-scene:empty{display:none;}
+/* 3P table view: both opponents side by side in the top row instead of one-per-page. */
+.table-dual-top{display:flex;align-items:stretch;justify-content:center;width:100%;height:100%;gap:8px;}
+.table-scene .table-dual-top .opp-panel{width:50%;max-width:none;}
 
 .hand-row{display:flex;justify-content:center;gap:clamp(3px,1.2vw,6px);flex:0 0 auto;padding:4px 0;
   min-height:clamp(66px,18.4vw,106px);align-items:flex-end;flex-wrap:wrap;}
@@ -566,7 +571,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v41';
+const GAME_VERSION='v42';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -907,7 +912,7 @@ function buildTableView(){
   const sceneBottom1=document.getElementById('table-scene-bottom-1');
   [sceneTop0,sceneTop1,sceneBottom0,sceneBottom1].forEach(el=>el.innerHTML='');
 
-  const buildPanel=(name,idSuffix,seat,sameOrientation)=>{
+  const buildPanel=(name,idSuffix,seat,sameOrientation,compact)=>{
     const panel=document.createElement('div');
     panel.className='opp-panel table-slot'; if(seat!=null) panel.dataset.seat=seat; panel.id='table-panel-'+idSuffix;
     const header=
@@ -917,9 +922,10 @@ function buildTableView(){
         `<div class="opp-hp-num" id="hn-${idSuffix}">${G.startHealth}</div>`+
         `<div class="opp-hand-count" id="handcount-${idSuffix}">H:0</div>`+
       `</div>`;
-    const hand=`<div class="hand-row${sameOrientation?'':' opp'}" id="hand-${idSuffix}"></div>`;
-    const st=`<div class="zone-row" id="st-${idSuffix}"></div>`;
-    const mon=`<div class="zone-row" id="mon-${idSuffix}"></div>`;
+    const c=compact?' compact':'';
+    const hand=`<div class="hand-row${c}${sameOrientation?'':' opp'}" id="hand-${idSuffix}"></div>`;
+    const st=`<div class="zone-row${c}" id="st-${idSuffix}"></div>`;
+    const mon=`<div class="zone-row${c}" id="mon-${idSuffix}"></div>`;
     // Seats that share your orientation (you, and your neighbor sitting beside you facing the same
     // way) read top-to-bottom as monsters/spells (nearest the center of the table) then hand
     // (nearest the real edge of the screen) -- matching the normal board. Seats that face you across
@@ -931,21 +937,26 @@ function buildTableView(){
 
   // Turn order is fixed as seat 0 (you), 1, 2, 3, wrapping -- i.e. seat N is N steps clockwise
   // from you, regardless of who won the starting die roll (that only picks who goes FIRST, not
-  // the seating chart). So the seats are placed to trace that same clockwise path around the
-  // table: you -> across from you -> across from your neighbor -> your neighbor -> back to you.
-  // Your right-hand neighbor is therefore the LAST seat before play wraps back to you, not the
-  // first -- exactly like real clockwise dealing, where the player to your right acts just before
-  // you do.
+  // the seating chart).
   sceneBottom0.appendChild(buildPanel('You','tme',null,true));
-  const hasNeighbor = G.numPlayers>=3;
-  const neighborSeat = G.numPlayers-1;
-  if(hasNeighbor) sceneBottom1.appendChild(buildPanel(pName(neighborSeat),'t'+neighborSeat,neighborSeat,true));
 
-  // Top row, left to right: whoever's turn comes right after yours (across from you), then
-  // whoever's next after that (across from your neighbor, 4P only) -- kept in the same
-  // left-to-right order as the bottom row so panning the two stays in sync.
-  if(G.numPlayers>=2) sceneTop0.appendChild(buildPanel(pName(1),'t1',1,false));
-  if(G.numPlayers>=4) sceneTop1.appendChild(buildPanel(pName(2),'t2',2,false));
+  if(G.numPlayers===3){
+    // 3P has no "neighbor sitting beside you" pairing -- both opponents face you across the table,
+    // side by side in a single top row, with you alone at the bottom. Nothing to pan to.
+    const dual=document.createElement('div'); dual.className='table-dual-top';
+    dual.appendChild(buildPanel(pName(1),'t1',1,false,true));
+    dual.appendChild(buildPanel(pName(2),'t2',2,false,true));
+    sceneTop0.appendChild(dual);
+  } else {
+    // 2P/4P: your right-hand neighbor is the LAST seat before play wraps back to you (real
+    // clockwise dealing, where the player to your right acts just before you do), seated beside
+    // you on page 1; the seat(s) that actually face you across the table go on top.
+    const hasNeighbor = G.numPlayers>=4;
+    const neighborSeat = G.numPlayers-1;
+    if(hasNeighbor) sceneBottom1.appendChild(buildPanel(pName(neighborSeat),'t'+neighborSeat,neighborSeat,true));
+    if(G.numPlayers>=2) sceneTop0.appendChild(buildPanel(pName(1),'t1',1,false));
+    if(G.numPlayers>=4) sceneTop1.appendChild(buildPanel(pName(2),'t2',2,false));
+  }
 
   const st=document.getElementById('table-scroll-top'), sb=document.getElementById('table-scroll-bottom');
   if(st) st.scrollLeft=0; if(sb) sb.scrollLeft=0;
@@ -2216,7 +2227,8 @@ function beginAttackDeclare(atkIdx){
 // Which corner of the Table View grid seat `seat` sits in -- mirrors buildTableView()'s clockwise
 // seating (seat1=across from you, seat2=across from your neighbor [4P only], last seat=neighbor).
 function tableQuadrantForSeat(seat){
-  const hasNeighbor=G.numPlayers>=3, neighborSeat=G.numPlayers-1;
+  // 3P has no neighbor seat -- both opponents face you across the table, top-left and top-right.
+  const hasNeighbor=G.numPlayers>=4, neighborSeat=G.numPlayers-1;
   if(hasNeighbor && seat===neighborSeat) return 'bottom-right';
   if(seat===1) return 'top-left';
   return 'top-right';
