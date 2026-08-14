@@ -715,6 +715,23 @@ function sendOnlineRelay(payload){
   if(!onlineSocket || onlineSocket.readyState!==WebSocket.OPEN) return;
   onlineSocket.send(JSON.stringify({type:'relay',payload}));
 }
+// Asks a SPECIFIC seat an interactive question, for decisions that belong to someone other than
+// whoever's action triggered them (e.g. the defender choosing a trap response to an attack the
+// ATTACKER declared) -- actingAsSeat's blanket ME-impersonation trick is wrong here because the
+// deciding seat is a genuinely different real browser than the one currently impersonated as ME.
+// This only ever runs host-side. Host's own real seat is always 0 (invariant of any impersonation
+// in effect) -- show the modal locally for that seat; for any other (a real remote guest, in the
+// current 2P-only scope) send just the display info over the relay and stash the real option
+// actions locally by requestId, since a closure can't be serialized -- resolved when that seat's
+// reply comes back through receiveOnlineRelay's 'choice-reply' handling below.
+let onlineChoiceSeq=0;
+const pendingOnlineChoices={};
+function askSeatChoice(seat,title,body,options){
+  if(seat===0){ showModal(title,body,options); return; }
+  const requestId='c'+(++onlineChoiceSeq);
+  pendingOnlineChoices[requestId]=options;
+  sendOnlineRelay({kind:'choice-request',toSeat:seat,requestId,title,body,labels:options.map(o=>o.label)});
+}
 function leaveOnlineRoom(){
   if(onlineSocket){ try{ onlineSocket.close(); }catch{} onlineSocket=null; }
   onlineMode=false; onlineIsHost=false; onlineSeatsTaken=[]; ME=0;
@@ -763,6 +780,12 @@ function placeTrapSetFor(pIdx,uid,idx){
   if(!card) return;
   actingAsSeat(pIdx,()=>placeTrapSet(card,idx));
 }
+// targetPlayer is passed explicitly (rather than read from G.selection, as resolveAttack does when
+// called locally) because G.selection is per-client local UI state -- by the time a guest's dispatch
+// reaches the host, the host's own G.selection has nothing to do with the guest's in-progress attack.
+function resolveAttackFor(pIdx,atkIdx,targetIdx,targetPlayer){
+  actingAsSeat(pIdx,()=>resolveAttack(atkIdx,targetIdx,targetPlayer));
+}
 // Whitelisted "top-level input" functions a guest's own action dispatches through instead of
 // mutating G directly (see dispatchAction()). Each one already exists as an ordinary local click
 // handler -- nothing about their own logic changes; the host just calls them in response to a
@@ -773,6 +796,7 @@ const ONLINE_ACTION_FNS={
   finishSummonFor:(pIdx,uid,idx,faceDown)=>finishSummonFor(pIdx,uid,idx,faceDown),
   placeSpellFor:(pIdx,uid,idx,activate)=>placeSpellFor(pIdx,uid,idx,activate),
   placeTrapSetFor:(pIdx,uid,idx)=>placeTrapSetFor(pIdx,uid,idx),
+  resolveAttackFor:(pIdx,atkIdx,targetIdx,targetPlayer)=>resolveAttackFor(pIdx,atkIdx,targetIdx,targetPlayer),
 };
 function dispatchAction(fnName,...args){
   if(onlineMode && !onlineIsHost){ sendOnlineRelay({kind:'action',fnName,args}); return; }
@@ -811,6 +835,14 @@ function receiveOnlineRelay(fromSeat,payload){
   } else if(payload.kind==='action' && onlineIsHost){
     const fn=ONLINE_ACTION_FNS[payload.fnName];
     if(fn) fn(...payload.args);
+  } else if(payload.kind==='choice-request' && payload.toSeat===ME){
+    showModal(payload.title,payload.body,payload.labels.map((label,i)=>({
+      label, action:()=>sendOnlineRelay({kind:'choice-reply',requestId:payload.requestId,index:i}),
+    })));
+  } else if(payload.kind==='choice-reply' && onlineIsHost){
+    const opts=pendingOnlineChoices[payload.requestId];
+    delete pendingOnlineChoices[payload.requestId];
+    if(opts && opts[payload.index]) opts[payload.index].action();
   }
   onOnlineRelayForRoomUI(fromSeat,payload);
 }
@@ -838,7 +870,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v55';
+const GAME_VERSION='v56';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -2168,7 +2200,7 @@ function finishLavaGolemSummon(card,tributeIdxs,targetOpp){
 }
 function onZoneCardClick(pIdx,type,idx){
   if(G.selection && G.selection.type==='attack' && G.selection.stage==='target' && pIdx===G.selection.targetPlayer && type==='mon'){
-    resolveAttack(G.selection.attackerIdx, idx);
+    dispatchAction('resolveAttackFor',ME,G.selection.attackerIdx,idx,G.selection.targetPlayer);
     return;
   }
   // battle declare: click own attack-ready monster
@@ -2650,20 +2682,27 @@ function startAttackTargetSelect(atkIdx,targetPlayer){
   const oppMons=G.players[targetPlayer].mon.some(m=>m);
   G.selection={type:'attack',stage:'target',attackerIdx:atkIdx,targetPlayer,mode: oppMons? 'select':'direct'};
   render();
-  if(!oppMons){ resolveAttack(atkIdx,-1); }
+  if(!oppMons){ dispatchAction('resolveAttackFor',ME,atkIdx,-1,targetPlayer); }
   else toast(`Choose a target on ${pName(targetPlayer)}'s field, or the target selector will show valid monsters.`);
 }
-function resolveAttack(atkIdx,targetIdx){
-  const targetPlayer=G.selection && G.selection.targetPlayer;
+function resolveAttack(atkIdx,targetIdx,targetPlayerArg){
+  // Captured up front, not read as ME later: the trap-response window this opens can stay pending
+  // across an async user click (a real defender's choice, possibly seconds later, possibly on a
+  // remote browser via askSeatChoice) -- by then, if this call is running inside a host's
+  // actingAsSeat(attackerSeat,...) impersonation (a networked guest's attack), ME will already have
+  // been restored to the host's own real seat. The closures below must not re-read the global ME
+  // at that later point, or they'd silently attack/battle as the wrong side.
+  const attackerSide=ME;
+  const targetPlayer=targetPlayerArg!==undefined ? targetPlayerArg : (G.selection && G.selection.targetPlayer);
   G.selection=null;
-  const attacker=G.players[ME].mon[atkIdx];
+  const attacker=G.players[attackerSide].mon[atkIdx];
   attacker.attacked=true;
   const isDirect = targetIdx===-1;
-  log(`You attack ${pName(targetPlayer)}${isDirect? ' directly!' : ' targeting a monster.'} with ${base(attacker).n}.`,'me');
+  log(`${attackerSide===ME?'You attack':pName(attackerSide)+' attacks'} ${pName(targetPlayer)}${isDirect? ' directly!' : ' targeting a monster.'} with ${base(attacker).n}.`, attackerSide===ME?'me':'opp');
   render();
-  openAttackTrapWindow(ME,targetPlayer,attacker,atkIdx,targetIdx,(cancelled)=>{
+  openAttackTrapWindow(attackerSide,targetPlayer,attacker,atkIdx,targetIdx,(cancelled)=>{
     if(cancelled){ render(); return; }
-    playClashAnimation(ME,targetPlayer,atkIdx,targetIdx,()=>performBattle(ME,targetPlayer,atkIdx,targetIdx));
+    playClashAnimation(attackerSide,targetPlayer,atkIdx,targetIdx,()=>performBattle(attackerSide,targetPlayer,atkIdx,targetIdx));
   });
 }
 function openAttackTrapWindow(attackerSide,defenderSide,attacker,atkIdx,targetIdx,cb){
@@ -2684,10 +2723,25 @@ function openAttackTrapWindow(attackerSide,defenderSide,attacker,atkIdx,targetId
     render();
     cb(false);
   };
-  if(defenderSide===ME){
-    const opts=eligible.map(e=>({label:base(e.c).n,card:e.c,action:()=>{ activateFromField(ME,e.i); resolveTrapVsAttack(e.fx,attackerSide,defenderSide,attacker,atkIdx,targetIdx,cb,defenderSide,e.i); }}));
-    if(mirage) opts.push({label:'Negate with Mirage Dragon',card:mirage,action:()=>{ log('Mirage Dragon negates the attack!','me'); const mEl=zoneCardEl(defenderSide,'mon',defP.mon.indexOf(mirage)),aEl=zoneCardEl(attackerSide,'mon',atkIdx); if(mEl&&aEl) playBeam(mEl,aEl,'trap'); cb(true); }});
+  const buildRealOpts=()=>{
+    const opts=eligible.map(e=>({label:base(e.c).n,card:e.c,action:()=>{ activateFromField(defenderSide,e.i); resolveTrapVsAttack(e.fx,attackerSide,defenderSide,attacker,atkIdx,targetIdx,cb,defenderSide,e.i); }}));
+    if(mirage) opts.push({label:'Negate with Mirage Dragon',card:mirage,action:()=>{ log('Mirage Dragon negates the attack!',defenderSide===ME?'me':'opp'); const mEl=zoneCardEl(defenderSide,'mon',defP.mon.indexOf(mirage)),aEl=zoneCardEl(attackerSide,'mon',atkIdx); if(mEl&&aEl) playBeam(mEl,aEl,'trap'); cb(true); }});
     if(kuriboh) opts.push({label:'Discard Kuriboh',card:kuriboh,action:useKuriboh});
+    return opts;
+  };
+  if(onlineMode){
+    // Online, the defender is always a real connected seat (2P scope: host or the one guest), never
+    // a bot -- route to a real prompt either way. Host's own real seat is invariantly 0 regardless of
+    // any actingAsSeat impersonation currently in effect (this whole function only ever runs
+    // host-side); any other seat is a genuinely different real browser, asked via askSeatChoice.
+    const opts=buildRealOpts();
+    if(opts.length===0){ cb(false); return; }
+    opts.push({label:'Take the hit',action:()=>cb(false)});
+    askSeatChoice(defenderSide,'Incoming Attack!',`${base(attacker).n} (ATK ${effAtk(attacker)}) is attacking. Respond?`,opts);
+    return;
+  }
+  if(defenderSide===ME){
+    const opts=buildRealOpts();
     if(opts.length===0){ cb(false); return; }
     opts.push({label:'Take the hit',action:()=>cb(false)});
     showModal('Incoming Attack!', `${base(attacker).n} (ATK ${effAtk(attacker)}) is attacking. Respond?`, opts);
