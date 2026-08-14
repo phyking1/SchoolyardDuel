@@ -723,6 +723,46 @@ function broadcastOnlineStateIfHost(){
   if(!onlineMode || !onlineIsHost) return;
   sendOnlineRelay({kind:'state',G});
 }
+// A number of "leaf" mutation functions (finishSummon, placeSpell, placeTrapSet, ...) read the
+// global ME directly rather than taking an explicit pIdx -- they were written when ME could only
+// ever be the one local human. Rather than threading an explicit pIdx through each one, the host
+// temporarily impersonates the acting remote seat for the duration of a single synchronous call,
+// then restores its own real seat. This is safe here specifically because everything these
+// particular leaf functions call downstream (afterSummon, afterAnySummon, etc.) already takes an
+// explicit pIdx of its own -- that was generalized back when local bot seats needed it -- so
+// nothing async that fires after ME is restored ends up reading the wrong value.
+// NOTE: this trick is NOT used for attack resolution -- openAttackTrapWindow's own defenderSide
+// ===ME check exists to route the DEFENDER's own trap-response prompt to whichever real browser
+// controls that seat, which is a different question from "who owns this mutation" and would be
+// answered wrong if ME were simply swapped to the attacker's seat. Attack networking needs that
+// distinction designed deliberately, so it isn't wired up yet.
+function actingAsSeat(pIdx,fn){
+  const real=ME;
+  ME=pIdx;
+  try{ fn(); } finally{ ME=real; }
+}
+function findCardByUid(pIdx,zoneType,uid){
+  if(zoneType==='hand') return G.players[pIdx].hand.find(c=>c.uid===uid)||null;
+  if(zoneType==='mon'||zoneType==='st') return G.players[pIdx][zoneType].find(c=>c&&c.uid===uid)||null;
+  return null;
+}
+// No-tribute Normal Summon/Set only for now -- tribute summons build their own bespoke modal
+// (openTributeModal) that isn't wired through dispatchAction yet.
+function finishSummonFor(pIdx,uid,idx,faceDown){
+  const card=findCardByUid(pIdx,'hand',uid);
+  if(!card) return;
+  actingAsSeat(pIdx,()=>finishSummon(card,idx,faceDown,[]));
+}
+function placeSpellFor(pIdx,uid,idx,activate){
+  const card=findCardByUid(pIdx,'hand',uid);
+  if(!card) return;
+  actingAsSeat(pIdx,()=>placeSpell(card,idx,activate));
+}
+function placeTrapSetFor(pIdx,uid,idx){
+  const card=findCardByUid(pIdx,'hand',uid);
+  if(!card) return;
+  actingAsSeat(pIdx,()=>placeTrapSet(card,idx));
+}
 // Whitelisted "top-level input" functions a guest's own action dispatches through instead of
 // mutating G directly (see dispatchAction()). Each one already exists as an ordinary local click
 // handler -- nothing about their own logic changes; the host just calls them in response to a
@@ -730,6 +770,9 @@ function broadcastOnlineStateIfHost(){
 const ONLINE_ACTION_FNS={
   drawPhaseClick:(seat)=>drawPhaseClick(seat),
   advancePhaseForSeat:(seat)=>advancePhaseForSeat(seat),
+  finishSummonFor:(pIdx,uid,idx,faceDown)=>finishSummonFor(pIdx,uid,idx,faceDown),
+  placeSpellFor:(pIdx,uid,idx,activate)=>placeSpellFor(pIdx,uid,idx,activate),
+  placeTrapSetFor:(pIdx,uid,idx)=>placeTrapSetFor(pIdx,uid,idx),
 };
 function dispatchAction(fnName,...args){
   if(onlineMode && !onlineIsHost){ sendOnlineRelay({kind:'action',fnName,args}); return; }
@@ -795,7 +838,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v54';
+const GAME_VERSION='v55';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1994,13 +2037,13 @@ function onEmptyZoneClick(pIdx,type,idx){
   } else if(type==='st' && G.selection.mode==='spelltrap'){
     if(b.cat==='Spell'){
       showModal(b.n,'How do you want to play this Spell Card?',[
-        {label:'Activate',action:()=>placeSpell(card,idx,true)},
-        {label:'Set Face-Down',action:()=>placeSpell(card,idx,false)},
+        {label:'Activate',action:()=>dispatchAction('placeSpellFor',ME,card.uid,idx,true)},
+        {label:'Set Face-Down',action:()=>dispatchAction('placeSpellFor',ME,card.uid,idx,false)},
         {label:'Cancel',action:()=>{ G.selection=null; render(); }},
       ]);
     } else {
       showModal(b.n,'Set this Trap Card face-down?',[
-        {label:'Set Face-Down',action:()=>placeTrapSet(card,idx)},
+        {label:'Set Face-Down',action:()=>dispatchAction('placeTrapSetFor',ME,card.uid,idx)},
         {label:'Cancel',action:()=>{ G.selection=null; render(); }},
       ]);
     }
@@ -2034,8 +2077,8 @@ function tryPlaceMonster(card,idx){
     return;
   }
   showModal(b.n,'Summon face-up (Attack Position) or Set face-down (Defense Position)?',[
-    {label:'Normal Summon',action:()=>finishSummon(card,idx,false,[])},
-    {label:'Set',action:()=>finishSummon(card,idx,true,[])},
+    {label:'Normal Summon',action:()=>dispatchAction('finishSummonFor',ME,card.uid,idx,false)},
+    {label:'Set',action:()=>dispatchAction('finishSummonFor',ME,card.uid,idx,true)},
     {label:'Cancel',action:()=>{ G.selection=null; render(); }},
   ]);
 }
