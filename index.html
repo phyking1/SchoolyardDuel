@@ -686,9 +686,8 @@ function toFrameRect(realRect){
 // to a room name first becomes seat 0 (the "host"); the host is the ONLY client that runs real
 // game logic (identical to local vs-bots play, just with no bots) -- it broadcasts the full G
 // state after every render(), and every other connected seat is a thin renderer of whatever it
-// last received. Swap RELAY_WS_BASE for the deployed Worker URL once one exists (see
-// server/README.md) -- this points at a local `wrangler dev` server for now.
-const RELAY_WS_BASE='ws://localhost:8787/room';
+// last received. Deployed via server/README.md / .github/workflows/deploy-relay.yml.
+const RELAY_WS_BASE='wss://schoolyardduel-relay.schoolyardduel.workers.dev/room';
 let onlineMode=false, onlineIsHost=false, onlineSocket=null, onlineSeatsTaken=[];
 function connectOnlineRoom(roomName,onWelcome){
   if(onlineSocket){ try{ onlineSocket.close(); }catch{} }
@@ -906,7 +905,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v57';
+const GAME_VERSION='v58';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');

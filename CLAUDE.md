@@ -11,8 +11,11 @@ content. `index.html`'s host client is the sole source of truth for a networked 
 same game logic as local vs-bots play and broadcasts the full state after every render(); other
 connected seats are thin renderers that dispatch their own actions back to the host instead of
 mutating state directly (see the "ONLINE MULTIPLAYER" section near the top of the `<script>`
-block, and `ONLINE_ACTION_FNS`/`dispatchAction()`). `RELAY_WS_BASE` currently points at a local
-`wrangler dev` server -- update it once the Worker is actually deployed.
+block, and `ONLINE_ACTION_FNS`/`dispatchAction()`). `RELAY_WS_BASE` points at the deployed Worker
+(`wss://schoolyardduel-relay.schoolyardduel.workers.dev/room`). Redeploy via the "Deploy relay
+server" GitHub Actions workflow (`.github/workflows/deploy-relay.yml`, manual trigger, needs a
+`CLOUDFLARE_API_TOKEN` repo secret) whenever `server/` changes -- it doesn't redeploy
+automatically on push.
 
 ## Versioning
 
