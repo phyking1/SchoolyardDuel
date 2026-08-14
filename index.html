@@ -931,7 +931,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v64';
+const GAME_VERSION='v65';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1349,10 +1349,13 @@ function buildTableView(){
   const sceneBottom0=document.getElementById('table-scene-bottom-0');
   const sceneBottom1=document.getElementById('table-scene-bottom-1');
   [sceneTop0,sceneTop1,sceneBottom0,sceneBottom1].forEach(el=>el.innerHTML='');
-  // Only 4P ever populates page 1 (see hasNeighbor below) -- 2P/3P have a single page, so the
-  // lone scene should fill the strip instead of reserving swipe-peek space for a page that
-  // will never exist.
-  const singlePage = G.numPlayers<4;
+  // 4P's zoom-out toggle (#zoom-toggle-btn) additionally collapses Table View down to a single
+  // no-panning screen -- the same "everyone side by side" treatment 3P already gets by default
+  // (3P never has a second page to pan to in the first place; 4P normally does, unless zoomed).
+  const zoomedFourP = G.numPlayers===4 && document.getElementById('board-wrap').classList.contains('zoomed-out');
+  // Only 4P (non-zoomed) ever populates page 1 -- every other case has a single page, so the lone
+  // scene should fill the strip instead of reserving swipe-peek space for a page that won't exist.
+  const singlePage = G.numPlayers<4 || zoomedFourP;
   sceneTop0.classList.toggle('solo', singlePage);
   sceneBottom0.classList.toggle('solo', singlePage);
   document.getElementById('table-scroll-top').classList.toggle('solo-page', singlePage);
@@ -1384,19 +1387,30 @@ function buildTableView(){
   // Turn order is fixed as seat 0 (you), 1, 2, 3, wrapping -- i.e. seat N is N steps clockwise
   // from you, regardless of who won the starting die roll (that only picks who goes FIRST, not
   // the seating chart).
-  sceneBottom0.appendChild(buildPanel('You','tme',null,true));
-
-  if(G.numPlayers===3){
-    // 3P has no "neighbor sitting beside you" pairing -- both opponents face you across the table,
-    // side by side in a single top row, with you alone at the bottom. Nothing to pan to.
-    const dual=document.createElement('div'); dual.className='table-dual-top';
-    dual.appendChild(buildPanel(pName(1),'t1',1,false,true));
-    dual.appendChild(buildPanel(pName(2),'t2',2,false,true));
-    sceneTop0.appendChild(dual);
+  if(G.numPlayers===3 || zoomedFourP){
+    // Both opponents that face you across the table go side by side in the top row -- nothing to
+    // pan to. Reuses the exact same dual-panel treatment 3P already has.
+    const dualTop=document.createElement('div'); dualTop.className='table-dual-top';
+    dualTop.appendChild(buildPanel(pName(1),'t1',1,false,true));
+    dualTop.appendChild(buildPanel(pName(2),'t2',2,false,true));
+    sceneTop0.appendChild(dualTop);
+    if(zoomedFourP){
+      // 4P zoomed also pairs you with your neighbor at the bottom instead of paging to them --
+      // the same dual treatment, just for the pair that shares your own orientation instead of
+      // the pair facing you across the table.
+      const neighborSeat=G.numPlayers-1;
+      const dualBottom=document.createElement('div'); dualBottom.className='table-dual-top';
+      dualBottom.appendChild(buildPanel('You','tme',null,true,true));
+      dualBottom.appendChild(buildPanel(pName(neighborSeat),'t'+neighborSeat,neighborSeat,true,true));
+      sceneBottom0.appendChild(dualBottom);
+    } else {
+      sceneBottom0.appendChild(buildPanel('You','tme',null,true));
+    }
   } else {
-    // 2P/4P: your right-hand neighbor is the LAST seat before play wraps back to you (real
-    // clockwise dealing, where the player to your right acts just before you do), seated beside
-    // you on page 1; the seat(s) that actually face you across the table go on top.
+    sceneBottom0.appendChild(buildPanel('You','tme',null,true));
+    // 2P/4P (not zoomed): your right-hand neighbor is the LAST seat before play wraps back to you
+    // (real clockwise dealing, where the player to your right acts just before you do), seated
+    // beside you on page 1; the seat(s) that actually face you across the table go on top.
     const hasNeighbor = G.numPlayers>=4;
     const neighborSeat = G.numPlayers-1;
     if(hasNeighbor) sceneBottom1.appendChild(buildPanel(pName(neighborSeat),'t'+neighborSeat,neighborSeat,true));
@@ -3421,6 +3435,11 @@ document.getElementById('zoom-toggle-btn').addEventListener('click',()=>{
   const zoomedOut=wrap.classList.toggle('zoomed-out');
   btn.classList.toggle('active',zoomedOut);
   btn.title=zoomedOut?'Zoom Back In':'Zoom Out to See Whole Board';
+  // buildTableView() reads the zoomed-out class live to decide between the normal paginated 4P
+  // layout and the no-panning dual-row one -- rebuild it now so Table View reflects the new state
+  // immediately, whether or not it's the currently-active view.
+  buildTableView();
+  render();
 });
 
 document.getElementById('view-toggle-btn').addEventListener('click',()=>{
