@@ -598,7 +598,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v50';
+const GAME_VERSION='v51';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -2943,20 +2943,6 @@ document.getElementById('board').addEventListener('pointerdown',(e)=>{
   tablePanDrag={startX:e.clientX,startScroll:document.getElementById('table-scroll-bottom').scrollLeft,dragging:false};
 });
 document.getElementById('board').addEventListener('pointermove',(e)=>{ if(tablePanDrag) tablePanApply(e.clientX); });
-// A drag can end at ANY intermediate scrollLeft, not just the two page positions -- with nothing
-// to correct it afterward, the strip is left parked mid-pan, showing two panels each cut in half
-// (the exact "cuts stuff off" report). Always settle on whichever full page is nearer once the
-// pointer lifts.
-function snapTablePanToNearestPage(){
-  const st=document.getElementById('table-scroll-top'), sb=document.getElementById('table-scroll-bottom');
-  const maxTop=Math.max(0,st.scrollWidth-st.clientWidth), maxBottom=Math.max(0,sb.scrollWidth-sb.clientWidth);
-  if(maxBottom<=0 && maxTop<=0) return; // 2P/3P: single page, nothing to snap to
-  const target = sb.scrollLeft > maxBottom/2 ? maxBottom : 0;
-  // scrollTo's own behavior:'smooth' animates just this snap -- the live drag itself (tablePanApply
-  // above) sets scrollLeft directly so it keeps tracking the pointer with zero animation lag.
-  st.scrollTo({left:Math.min(target,maxTop), behavior:'smooth'});
-  sb.scrollTo({left:Math.min(target,maxBottom), behavior:'smooth'});
-}
 document.addEventListener('pointerup',()=>{
   if(tablePanDrag && tablePanDrag.dragging){
     tableJustDragged=true;
@@ -2964,14 +2950,10 @@ document.addEventListener('pointerup',()=>{
     // mouse-drag in headless Chromium) -- self-clear so a stale flag can't swallow some later,
     // unrelated tap. The click listener below still clears it immediately in the normal case.
     setTimeout(()=>{ tableJustDragged=false; },350);
-    snapTablePanToNearestPage();
   }
   tablePanDrag=null;
 });
-document.addEventListener('pointercancel',()=>{
-  if(tablePanDrag && tablePanDrag.dragging) snapTablePanToNearestPage();
-  tablePanDrag=null;
-});
+document.addEventListener('pointercancel',()=>{ tablePanDrag=null; });
 // Swallow the click that a real pointer/touch device fires right after a drag release, so panning
 // never accidentally activates a card or zone underneath the finger.
 document.getElementById('board').addEventListener('click',(e)=>{
