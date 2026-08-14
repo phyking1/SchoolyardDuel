@@ -142,8 +142,12 @@ button{font-family:inherit;cursor:pointer;}
 .opp-panel.active-turn{box-shadow:0 0 0 2px var(--turnglow),0 0 10px 1px var(--turnglow);}
 /* 2P has only one opponent panel, so its own turn-glow box is redundant with (and visually
    competes with) the glowing-cards indicator below -- drop it there, keep it for 3-4P where it's
-   the only way to tell which of several panels is active. */
+   the only way to tell which of several panels is active. Same reasoning for the panel's border/
+   background: with only one opponent, there's nothing to visually separate it FROM, so drop the
+   box entirely -- their board just sits directly on the page background, mirroring how "You"'s
+   own board area already has no box around it either. */
 #board.two-player-mode .opp-panel.active-turn{box-shadow:none;}
+#board.two-player-mode .opp-panel{border:none;background:none;}
 .opp-panel-header{display:flex;align-items:center;gap:6px;padding:0 2px;}
 .opp-panel-name{font-size:clamp(.55em,1.8cqw,.72em);font-weight:800;color:var(--gold);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:0 0 auto;max-width:22cqw;}
@@ -927,7 +931,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v63';
+const GAME_VERSION='v64';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
