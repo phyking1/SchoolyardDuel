@@ -382,7 +382,7 @@ button{font-family:inherit;cursor:pointer;}
   font-size:.9em;display:none;box-shadow:0 4px 14px rgba(0,0,0,.5);}
 
 /* card browser: deck list / graveyard */
-#decklist-btn,#viewlog-btn,#exitgame-btn{position:fixed;top:10px;z-index:51;width:38px;height:38px;
+#decklist-btn,#viewlog-btn,#exitgame-btn,#zoom-toggle-btn{position:fixed;top:10px;z-index:51;width:38px;height:38px;
   border-radius:50%;background:#16281c;border:1px solid var(--gold-dim);color:var(--ink);
   font-size:1.1em;display:flex;align-items:center;justify-content:center;}
 /* the log and exit buttons only make sense once a duel is actually running -- the deck-list
@@ -392,6 +392,13 @@ button{font-family:inherit;cursor:pointer;}
 #viewlog-btn{right:56px;}
 #exitgame-btn{right:102px;}
 #decklist-btn:hover,#viewlog-btn:hover,#exitgame-btn:hover{border-color:var(--gold);}
+/* Only 4P's stacked List View ever needs a manual escape hatch from the internal scroll (see
+   #board's own comment) -- shown/hidden per player count in JS, not CSS, alongside the existing
+   two-player-mode toggle. Top-LEFT, mirroring the other icon buttons which all live top-right. */
+#zoom-toggle-btn{left:10px;display:none;}
+#zoom-toggle-btn.active{border-color:var(--gold);background:#1c2c1e;color:var(--gold);}
+#zoom-toggle-btn:hover{border-color:var(--gold);}
+#board-wrap.zoomed-out #board,#board-wrap.zoomed-out #hp-rail-me{zoom:.72;}
 #log-modal-list{max-height:60cqh;overflow-y:auto;display:flex;flex-direction:column;
   gap:2px;margin:10px 0;text-align:left;font-size:.85em;}
 #log-modal-list .lg{padding:4px 2px;border-bottom:1px solid rgba(255,255,255,.06);}
@@ -516,6 +523,7 @@ button{font-family:inherit;cursor:pointer;}
 <button id="decklist-btn" title="View Deck List">📜</button>
 <button id="viewlog-btn" title="View Full Log">📋</button>
 <button id="exitgame-btn" title="Exit Game">🚪</button>
+<button id="zoom-toggle-btn" title="Zoom Out to See Whole Board">🔍</button>
 <div id="turn-flash-wrap"><div id="turn-flash-text"></div></div>
 
 <div id="start-screen">
@@ -866,6 +874,9 @@ function receiveOnlineRelay(fromSeat,payload){
       document.getElementById('exitgame-btn').style.display='flex';
       document.getElementById('board').classList.toggle('two-player-mode',G.numPlayers===2);
       document.getElementById('board-wrap').classList.toggle('two-player-mode',G.numPlayers===2);
+      document.getElementById('zoom-toggle-btn').style.display=G.numPlayers===4?'flex':'none';
+      document.getElementById('board-wrap').classList.remove('zoomed-out');
+      document.getElementById('zoom-toggle-btn').classList.remove('active');
       buildOpponentPanels();
       buildTableView();
       switchViewMode(G.numPlayers>=3 ? 'table' : 'list');
@@ -916,7 +927,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v62';
+const GAME_VERSION='v63';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1411,6 +1422,9 @@ function beginDuel(){
   document.getElementById('exitgame-btn').style.display='flex';
   document.getElementById('board').classList.toggle('two-player-mode',G.numPlayers===2);
   document.getElementById('board-wrap').classList.toggle('two-player-mode',G.numPlayers===2);
+  document.getElementById('zoom-toggle-btn').style.display=G.numPlayers===4?'flex':'none';
+  document.getElementById('board-wrap').classList.remove('zoomed-out');
+  document.getElementById('zoom-toggle-btn').classList.remove('active');
   G.health=Array(G.numPlayers).fill(G.startHealth);
   G.noBattleDamage=Array(G.numPlayers).fill(false);
   G.isBot=onlineMode ? Array(G.numPlayers).fill(false) : Array.from({length:G.numPlayers},(_,i)=>i!==ME);
@@ -3397,6 +3411,12 @@ document.getElementById('exitgame-btn').addEventListener('click',()=>{
     {label:'Exit Game',action:()=>{ location.reload(); }},
     {label:'Cancel',action:()=>{}},
   ]);
+});
+document.getElementById('zoom-toggle-btn').addEventListener('click',()=>{
+  const wrap=document.getElementById('board-wrap'), btn=document.getElementById('zoom-toggle-btn');
+  const zoomedOut=wrap.classList.toggle('zoomed-out');
+  btn.classList.toggle('active',zoomedOut);
+  btn.title=zoomedOut?'Zoom Back In':'Zoom Out to See Whole Board';
 });
 
 document.getElementById('view-toggle-btn').addEventListener('click',()=>{
