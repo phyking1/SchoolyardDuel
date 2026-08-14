@@ -160,6 +160,10 @@ button{font-family:inherit;cursor:pointer;}
   display:flex;align-items:stretch;justify-content:center;height:100%;}
 .table-scene .opp-panel{width:100%;max-width:340px;min-height:0;overflow:hidden;justify-content:center;}
 .table-scene:empty{display:none;}
+/* 2P/3P Table View has no second page to peek at (only page 0 exists), so the lone scene should
+   fill the whole strip instead of keeping the 86% swipe-affordance sizing -- otherwise it sits
+   flush left with dead space held open on the right for a page that will never appear. */
+.table-scene.solo{flex:1 1 auto;}
 /* 3P table view: both opponents side by side in the top row instead of one-per-page. */
 .table-dual-top{display:flex;align-items:stretch;justify-content:center;width:100%;height:100%;gap:8px;}
 .table-scene .table-dual-top .opp-panel{width:50%;max-width:none;}
@@ -585,7 +589,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v46';
+const GAME_VERSION='v47';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -925,6 +929,12 @@ function buildTableView(){
   const sceneBottom0=document.getElementById('table-scene-bottom-0');
   const sceneBottom1=document.getElementById('table-scene-bottom-1');
   [sceneTop0,sceneTop1,sceneBottom0,sceneBottom1].forEach(el=>el.innerHTML='');
+  // Only 4P ever populates page 1 (see hasNeighbor below) -- 2P/3P have a single page, so the
+  // lone scene should fill the strip instead of reserving swipe-peek space for a page that
+  // will never exist.
+  const singlePage = G.numPlayers<4;
+  sceneTop0.classList.toggle('solo', singlePage);
+  sceneBottom0.classList.toggle('solo', singlePage);
 
   const buildPanel=(name,idSuffix,seat,sameOrientation,compact)=>{
     const panel=document.createElement('div');
