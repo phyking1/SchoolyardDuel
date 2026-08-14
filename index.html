@@ -867,6 +867,13 @@ function receiveOnlineRelay(fromSeat,payload){
       switchViewMode(G.numPlayers>=3 ? 'table' : 'list');
     }
     render();
+    // render() itself bails out immediately once G.gameOver is true, without ever showing the
+    // overlay -- the host paints its own via endGame()'s own call to showGameOverScreen(), but a
+    // guest never runs endGame() itself, only ever finds out the game ended through this
+    // broadcast. Guard on the overlay not already being shown so a later, redundant broadcast
+    // (there usually isn't one -- see endGame()'s comment -- but just in case) doesn't replay the
+    // victory/defeat SFX a second time.
+    if(G.gameOver && document.getElementById('gameover-bg').style.display!=='flex') showGameOverScreen();
   } else if(payload.kind==='action' && onlineIsHost){
     const fn=ONLINE_ACTION_FNS[payload.fnName];
     if(fn) fn(...payload.args);
@@ -905,7 +912,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v60';
+const GAME_VERSION='v61';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1042,6 +1049,9 @@ let G={
   skipBattle:null, // {side,setTurn} Wattlemur — that side skips their next Battle Phase
   selection:null, // ui selection state
   gameOver:false,
+  winner:null, // set by endGame() -- seat index, or null for a draw. Persisted on G (not just a
+               // local parameter) so it survives being broadcast to a guest, who never runs
+               // checkWin()/endGame() itself (see endGame()'s own comment).
   isBot:[false,true],
   log:[],
 };
@@ -1640,16 +1650,37 @@ function checkWin(){
   if(changed) render();
   return false;
 }
+// endGame() itself only ever runs on whoever is executing real game logic -- the host in an
+// online game, or the only client at all in local play. A guest never calls checkWin()/endGame()
+// itself; it only finds out the game ended via the broadcast that G.winner/G.gameOver ride along
+// on, then calls showGameOverScreen() itself from receiveOnlineRelay. That's also why the winner
+// is stored on G rather than just passed around as a parameter -- it needs to survive being
+// serialized across the wire.
 function endGame(winner){
   G.gameOver=true;
-  const title = winner===null ? 'Draw' : (winner===ME? 'Victory!' : 'Defeat...');
+  G.winner=winner;
+  showGameOverScreen();
+  // render() bails out immediately once G.gameOver is true (the board freezes under the overlay),
+  // which means the broadcast that would normally carry this final state never goes out -- send
+  // one explicitly so a guest actually finds out the game ended, instead of the connection just
+  // going quiet forever on their end.
+  broadcastOnlineStateIfHost();
+}
+// Paints the game-over overlay for THIS physical screen. Uses MY_REAL_SEAT, not ME, for the same
+// reason render() does (see MY_REAL_SEAT's own declaration comment): this can run on the host
+// while ME is transiently impersonating a remote seat, or run standalone on a guest's client
+// (which has no impersonation concept at all, but also no reason to ever read anything but its
+// own real identity here).
+function showGameOverScreen(){
+  const winner=G.winner;
+  const title = winner===null ? 'Draw' : (winner===MY_REAL_SEAT? 'Victory!' : 'Defeat...');
   const sub = winner===null ? 'Every remaining player was eliminated at once.'
-    : winner===ME ? 'You are the last one standing.'
+    : winner===MY_REAL_SEAT ? 'You are the last one standing.'
     : `${pName(winner)} is the last one standing.`;
   document.getElementById('go-title').textContent = title;
   document.getElementById('go-sub').textContent = sub;
   document.getElementById('gameover-bg').style.display='flex';
-  if(winner===ME) SFX.victory(); else if(winner!==null) SFX.defeat();
+  if(winner===MY_REAL_SEAT) SFX.victory(); else if(winner!==null) SFX.defeat();
 }
 function dealDamage(pIdx,amount,isBattle){
   if(amount<=0 || G.players[pIdx].eliminated) return;
