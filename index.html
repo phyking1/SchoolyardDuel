@@ -598,7 +598,7 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-const GAME_VERSION='v51';
+const GAME_VERSION='v52';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1620,6 +1620,52 @@ function render(){
     deckPile.appendChild(ar);
   }
   syncRailHeights();
+  fitBoardToAvailableSpace();
+}
+// In Safari's normal in-tab browsing (not "Add to Home Screen"), the address bar and bottom
+// toolbar eat into the visible viewport well below what #game-root's 100dvh assumes on some
+// devices/orientations, so #board's content can end up taller than the space it's actually
+// given. Instead of letting that get clipped, or relying only on internal scrolling, measure
+// #board's real content size against the space it was actually allotted and shrink the whole
+// thing down to fit -- nothing should ever be cut off, worst case everything just gets a little
+// smaller.
+const BOARD_MIN_FIT_SCALE=0.72;
+function fitBoardToAvailableSpace(){
+  const board=document.getElementById('board');
+  if(!board || document.getElementById('game-root').style.display==='none') return;
+  // scrollHeight/scrollWidth (full natural content extent) and clientHeight/clientWidth
+  // (the actual box #board was laid out into) are both unaffected by any transform already
+  // applied below, so this is safe to re-measure on every call with no reset needed.
+  const naturalH=board.scrollHeight, naturalW=board.scrollWidth;
+  const availH=board.clientHeight, availW=board.clientWidth;
+  if(naturalH<=0 || naturalW<=0 || availH<=0 || availW<=0) return;
+  const scaleH = naturalH>availH ? availH/naturalH : 1;
+  const scaleW = naturalW>availW ? availW/naturalW : 1;
+  let scale=Math.min(scaleH,scaleW,1);
+  let fullyFits=true;
+  if(scale<BOARD_MIN_FIT_SCALE){
+    // Shrinking enough to fully eliminate the overflow would go past the readability floor --
+    // clamp to the floor instead and let the (now much smaller) remaining overflow scroll, so
+    // content never shrinks into illegibility just to avoid a little residual scrolling.
+    scale=BOARD_MIN_FIT_SCALE;
+    fullyFits=false;
+  }
+  board.style.transformOrigin='top center';
+  board.style.transform = scale<1 ? `scale(${scale})` : 'none';
+  // Once the content visually fits, its own scrollbar/scroll-gesture would just be dead space
+  // beyond what's needed -- disable it so nothing wobbles under a stray touch-scroll. Keep it
+  // enabled whenever there's still genuine leftover overflow even at the floor scale.
+  board.style.overflowY = (scale<1 && fullyFits) ? 'hidden' : 'auto';
+}
+window.addEventListener('resize',()=>{
+  if(document.getElementById('game-root').style.display!=='none'){ syncRailHeights(); fitBoardToAvailableSpace(); }
+});
+if(window.visualViewport){
+  // Safari's address bar/toolbar showing or hiding mid-session (e.g. after a scroll) changes
+  // the visible viewport without necessarily firing a 'resize' event on window itself.
+  window.visualViewport.addEventListener('resize',()=>{
+    if(document.getElementById('game-root').style.display!=='none') fitBoardToAvailableSpace();
+  });
 }
 function syncRailHeights(){
   // Some mobile browsers mis-stretch a flex sibling with an auto-height nested
