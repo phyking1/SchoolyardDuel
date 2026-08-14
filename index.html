@@ -76,7 +76,7 @@ button{font-family:inherit;cursor:pointer;}
   box-shadow:0 6px 18px rgba(0,0,0,.5);}
 .die1.spin{animation:diespin .9s ease-out;}
 @keyframes diespin{0%{transform:rotate(0)}70%{transform:rotate(720deg)}100%{transform:rotate(1080deg)}}
-#version-tag{position:absolute;left:0;right:0;bottom:8px;text-align:center;
+#version-tag{position:absolute;right:8px;bottom:8px;text-align:right;
   font-size:.68em;color:var(--dim);opacity:.6;pointer-events:none;}
 #recache-btn{display:block;margin:14px auto 0;
   background:#16281c;border:1px solid var(--gold-dim);color:var(--dim);
@@ -905,7 +905,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v59';
+const GAME_VERSION='v60';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
