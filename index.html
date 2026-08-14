@@ -258,6 +258,11 @@ button{font-family:inherit;cursor:pointer;}
   pointer-events:none;}
 .draw-arrow.up{top:auto;bottom:-38px;}
 @keyframes bounce{0%,100%{transform:translateX(-50%) translateY(0);}50%{transform:translateX(-50%) translateY(-8px);}}
+.pile.draw-ready{animation:deckPulse 1.4s ease-in-out infinite;}
+@keyframes deckPulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(217,180,90,.7),0 0 0 2px var(--gold);}
+  50%{box-shadow:0 0 14px 6px rgba(217,180,90,.35),0 0 0 2px var(--gold);}
+}
 
 /* ---------- dice roll overlay (transient, not permanent board space) ---------- */
 #dice-overlay-bg{position:fixed;inset:0;background:rgba(0,0,0,.55);display:none;align-items:center;
@@ -363,8 +368,10 @@ button{font-family:inherit;cursor:pointer;}
 .card.zoom.facedown::after{font-size:2.4em;}
 
 /* modal */
+/* Above #gameover-bg's z-index:95 -- the game log (and any other modal) needs to render on top of
+   the victory/defeat overlay, since "View Game Log" is reachable from there. */
 .modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:center;
-  justify-content:center;z-index:80;}
+  justify-content:center;z-index:96;}
 .modal{background:var(--panel2);border:1px solid var(--gold-dim);border-radius:10px;padding:20px;
   max-width:520px;width:90%;max-height:80cqh;overflow-y:auto;}
 .modal h3{margin-top:0;color:var(--gold);}
@@ -943,7 +950,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v69';
+const GAME_VERSION='v70';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -2097,10 +2104,12 @@ function render(){
   const deckPile=document.getElementById('pile-deck');
   const existingArrow=deckPile.querySelector('.draw-arrow');
   if(existingArrow) existingArrow.remove();
-  if(G.phase==='draw' && G.active===MY_REAL_SEAT && !skipsDrawFirstTurn(MY_REAL_SEAT)){
+  const myDrawTurn = G.phase==='draw' && G.active===MY_REAL_SEAT && !skipsDrawFirstTurn(MY_REAL_SEAT);
+  if(myDrawTurn){
     const ar=document.createElement('div'); ar.className='draw-arrow'; ar.textContent='▼';
     deckPile.appendChild(ar);
   }
+  deckPile.classList.toggle('draw-ready', myDrawTurn);
   syncRailHeights();
   broadcastOnlineStateIfHost();
 }
