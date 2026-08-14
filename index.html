@@ -763,12 +763,43 @@ function findCardByUid(pIdx,zoneType,uid){
   if(zoneType==='mon'||zoneType==='st') return G.players[pIdx][zoneType].find(c=>c&&c.uid===uid)||null;
   return null;
 }
-// No-tribute Normal Summon/Set only for now -- tribute summons build their own bespoke modal
-// (openTributeModal) that isn't wired through dispatchAction yet.
-function finishSummonFor(pIdx,uid,idx,faceDown){
+function finishSummonFor(pIdx,uid,idx,faceDown,tributeIdxs){
   const card=findCardByUid(pIdx,'hand',uid);
   if(!card) return;
-  actingAsSeat(pIdx,()=>finishSummon(card,idx,faceDown,[]));
+  actingAsSeat(pIdx,()=>finishSummon(card,idx,faceDown,tributeIdxs||[]));
+}
+function finishLavaGolemSummonFor(pIdx,uid,tributeIdxs,targetOpp){
+  const card=findCardByUid(pIdx,'hand',uid);
+  if(!card) return;
+  actingAsSeat(pIdx,()=>finishLavaGolemSummon(card,tributeIdxs,targetOpp));
+}
+function flipSummonFor(pIdx,idx){
+  actingAsSeat(pIdx,()=>flipSummon(pIdx,idx));
+}
+function changePositionFor(pIdx,idx){
+  actingAsSeat(pIdx,()=>{
+    const card=G.players[pIdx].mon[idx];
+    if(!card || card.faceDown || card.summonedTurn===G.turnNum || card.positionLocked) return;
+    const to=card.pos==='atk'?'def':'atk';
+    card.pos=to;
+    log(`Changed ${base(card).n} to ${to==='atk'?'Attack':'Defense'} Position.`,'me');
+    render();
+  });
+}
+function activateMonsterEffectFor(pIdx,idx){
+  actingAsSeat(pIdx,()=>{
+    const card=G.players[pIdx].mon[idx];
+    if(!card) return;
+    const eff=getActivatableMonsterEffect(card,pIdx,idx);
+    if(eff) eff.activate();
+  });
+}
+function activateSetSpellTrapFor(pIdx,idx){
+  actingAsSeat(pIdx,()=>{
+    const card=G.players[pIdx].st[idx];
+    if(!card||!card.faceDown) return;
+    activateFromField(pIdx,idx,()=>offerDarkBribeResponse(pIdx,card,idx,()=>resolveSpellTrapEffect(pIdx,card,idx)));
+  });
 }
 function placeSpellFor(pIdx,uid,idx,activate){
   const card=findCardByUid(pIdx,'hand',uid);
@@ -793,10 +824,15 @@ function resolveAttackFor(pIdx,atkIdx,targetIdx,targetPlayer){
 const ONLINE_ACTION_FNS={
   drawPhaseClick:(seat)=>drawPhaseClick(seat),
   advancePhaseForSeat:(seat)=>advancePhaseForSeat(seat),
-  finishSummonFor:(pIdx,uid,idx,faceDown)=>finishSummonFor(pIdx,uid,idx,faceDown),
+  finishSummonFor:(pIdx,uid,idx,faceDown,tributeIdxs)=>finishSummonFor(pIdx,uid,idx,faceDown,tributeIdxs),
+  finishLavaGolemSummonFor:(pIdx,uid,tributeIdxs,targetOpp)=>finishLavaGolemSummonFor(pIdx,uid,tributeIdxs,targetOpp),
   placeSpellFor:(pIdx,uid,idx,activate)=>placeSpellFor(pIdx,uid,idx,activate),
   placeTrapSetFor:(pIdx,uid,idx)=>placeTrapSetFor(pIdx,uid,idx),
   resolveAttackFor:(pIdx,atkIdx,targetIdx,targetPlayer)=>resolveAttackFor(pIdx,atkIdx,targetIdx,targetPlayer),
+  flipSummonFor:(pIdx,idx)=>flipSummonFor(pIdx,idx),
+  changePositionFor:(pIdx,idx)=>changePositionFor(pIdx,idx),
+  activateMonsterEffectFor:(pIdx,idx)=>activateMonsterEffectFor(pIdx,idx),
+  activateSetSpellTrapFor:(pIdx,idx)=>activateSetSpellTrapFor(pIdx,idx),
 };
 function dispatchAction(fnName,...args){
   if(onlineMode && !onlineIsHost){ sendOnlineRelay({kind:'action',fnName,args}); return; }
@@ -870,7 +906,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v56';
+const GAME_VERSION='v57';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1706,7 +1742,7 @@ function triggerOnSentToGY(pIdx,card){
     if(opts.length){
       // auto for bot, prompt for human
       if(pIdx===ME){
-        showModal('Witch of the Black Forest',`Add 1 monster with 1500 or less DEF from your Deck to your hand?`,[
+        askSeatChoice(pIdx,'Witch of the Black Forest',`Add 1 monster with 1500 or less DEF from your Deck to your hand?`,[
           {label:'Search',action:()=>{ const pick=opts[Math.floor(Math.random()*opts.length)]; deck.splice(pick.i,1); G.deck=deck; G.players[pIdx].hand.push(pick.c); shuffleAfterSearch(); log(`Added ${base(pick.c).n} to hand.`,'me'); render(); }},
           {label:'Skip',action:()=>{}},
         ]);
@@ -2166,8 +2202,8 @@ function openTributeModal(card,idx,need,tributeSide,onConfirm){
     const tribs=[...selected];
     if(onConfirm){ onConfirm(tribs); return; }
     showModal(base(card).n,'Summon face-up (Attack Position) or Set face-down (Defense Position)?',[
-      {label:'Tribute Summon',action:()=>finishSummon(card,idx,false,tribs)},
-      {label:'Tribute Set',action:()=>finishSummon(card,idx,true,tribs)},
+      {label:'Tribute Summon',action:()=>dispatchAction('finishSummonFor',ME,card.uid,idx,false,tribs)},
+      {label:'Tribute Set',action:()=>dispatchAction('finishSummonFor',ME,card.uid,idx,true,tribs)},
     ]);
   });
   const cancelBtn=document.createElement('div'); cancelBtn.className='mopt';
@@ -2180,7 +2216,7 @@ function openTributeModal(card,idx,need,tributeSide,onConfirm){
   refresh();
 }
 function openLavaGolemTributeModal(card,targetOpp){
-  openTributeModal(card,-1,2,targetOpp,(tribs)=>finishLavaGolemSummon(card,tribs,targetOpp));
+  openTributeModal(card,-1,2,targetOpp,(tribs)=>dispatchAction('finishLavaGolemSummonFor',ME,card.uid,tribs,targetOpp));
 }
 function finishLavaGolemSummon(card,tributeIdxs,targetOpp){
   tributeIdxs.sort((a,b)=>b-a).forEach(i=>{
@@ -2220,7 +2256,7 @@ function onZoneCardClick(pIdx,type,idx){
     if(!card) return;
     if(card.faceDown){
       showModal(base(card).n,'Flip Summon this Set monster face-up?',[
-        {label:'Flip Summon',action:()=>flipSummon(ME,idx)},
+        {label:'Flip Summon',action:()=>dispatchAction('flipSummonFor',ME,idx)},
         {label:'Cancel',action:()=>{}},
       ]);
       return;
@@ -2230,9 +2266,9 @@ function onZoneCardClick(pIdx,type,idx){
     const opts=[];
     if(canChangePos){
       const to=card.pos==='atk'?'def':'atk';
-      opts.push({label:`Change to ${to==='atk'?'Attack':'Defense'} Position`,action:()=>{card.pos=to; log(`Changed ${base(card).n} to ${to==='atk'?'Attack':'Defense'} Position.`,'me'); render();}});
+      opts.push({label:`Change to ${to==='atk'?'Attack':'Defense'} Position`,action:()=>dispatchAction('changePositionFor',ME,idx)});
     }
-    if(eff) opts.push({label:eff.label,action:eff.activate});
+    if(eff) opts.push({label:eff.label,action:()=>dispatchAction('activateMonsterEffectFor',ME,idx)});
     if(!opts.length){
       toast(card.positionLocked?"This monster's Battle Position is locked.":"Can't change position the turn it was Summoned.");
       return;
@@ -2249,12 +2285,12 @@ function onZoneCardClick(pIdx,type,idx){
     if(b.cat==='Trap' && (b.sub==='Counter' || RESPONSE_ONLY_TRAP_FX.has(b.fx))){ toast('This Trap can only be activated in response to something.'); return; }
     if(b.cat==='Spell'){
       showModal(b.n,'Activate this Spell Card?',[
-        {label:'Activate',card,action:()=>activateFromField(ME,idx,()=>offerDarkBribeResponse(ME,card,idx,()=>resolveSpellTrapEffect(ME,card,idx)))},
+        {label:'Activate',card,action:()=>dispatchAction('activateSetSpellTrapFor',ME,idx)},
         {label:'Cancel',card,action:()=>{}},
       ]);
     } else {
       showModal(b.n,'Activate this Trap Card?',[
-        {label:'Activate',card,action:()=>activateFromField(ME,idx,()=>offerDarkBribeResponse(ME,card,idx,()=>resolveSpellTrapEffect(ME,card,idx)))},
+        {label:'Activate',card,action:()=>dispatchAction('activateSetSpellTrapFor',ME,idx)},
         {label:'Cancel',card,action:()=>{}},
       ]);
     }
@@ -2316,12 +2352,14 @@ function offerDarkBribeResponse(activatorSide,card,idx,onResolve){
     const seat=others[i];
     const eligible=findEligible(seat);
     if(!eligible.length){ askSeat(i+1); return; }
+    const pick=eligible[0];
+    const opts=[
+      {label:base(pick.c).n, card:pick.c, action:()=>activateBribe(seat,pick.i,pick.c)},
+      {label:'Pass', action:()=>askSeat(i+1)},
+    ];
+    if(onlineMode){ askSeatChoice(seat, 'Activate a Trap?', `${pName(activatorSide)} activated ${base(card).n}. Respond with Dark Bribe?`, opts); return; }
     if(seat===ME){
-      const pick=eligible[0];
-      showModal('Activate a Trap?', `${pName(activatorSide)} activated ${base(card).n}. Respond with Dark Bribe?`, [
-        {label:base(pick.c).n, card:pick.c, action:()=>activateBribe(ME,pick.i,pick.c)},
-        {label:'Pass', action:()=>askSeat(i+1)},
-      ]);
+      showModal('Activate a Trap?', `${pName(activatorSide)} activated ${base(card).n}. Respond with Dark Bribe?`, opts);
     } else {
       activateBribe(seat, eligible[0].i, eligible[0].c);
     }
@@ -2367,11 +2405,11 @@ function afterSummon(pIdx,card,idx){
       const defTargets=(opp)=>{ const arr=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown && m.pos==='def' && !m.unaffectedByEffects) arr.push(i); }); return arr; };
       if(pIdx===ME){
         const chooseTarget=(opp)=>{
-          showModal('Hunter Dragon','Destroy a face-up Defense Position monster?',
+          askSeatChoice(pIdx,'Hunter Dragon','Destroy a face-up Defense Position monster?',
             defTargets(opp).map(i=>({label:base(G.players[opp].mon[i]).n,action:()=>doIt(opp,i)})).concat([{label:'Skip',action:()=>{}}]));
         };
         if(eligibleOpponents.length===1) chooseTarget(eligibleOpponents[0]);
-        else showModal('Hunter Dragon','Target which opponent?',
+        else askSeatChoice(pIdx,'Hunter Dragon','Target which opponent?',
           eligibleOpponents.map(s=>({label:`${pName(s)} (${G.health[s]} HP)`,action:()=>chooseTarget(s)})).concat([{label:'Skip',action:()=>{}}]));
       } else {
         const opp=eligibleOpponents[Math.floor(Math.random()*eligibleOpponents.length)];
@@ -2413,9 +2451,12 @@ function openSummonTrapWindow(summonerIdx,card,idx,isSpecial){
     const seat=others[i];
     const eligible=findEligible(seat);
     if(!eligible.length){ askSeat(i+1); return; }
+    const opts=eligible.map(e=>({label:base(e.c).n,card:e.c,action:()=>{ resolveSummonTrap(seat,e.i,e.c,e.fx,summonerIdx,card,idx); }}));
+    opts.push({label:'Pass',action:()=>askSeat(i+1)});
+    // Online, every other living seat is a real connected player (2P scope: never a bot) -- always
+    // route to a real prompt, on whichever real browser controls that seat (see askSeatChoice).
+    if(onlineMode){ askSeatChoice(seat, 'Activate a Trap?', `${pName(summonerIdx)} Summoned ${base(card).n}.`, opts); return; }
     if(seat===ME){
-      const opts=eligible.map(e=>({label:base(e.c).n,card:e.c,action:()=>{ resolveSummonTrap(ME,e.i,e.c,e.fx,summonerIdx,card,idx); }}));
-      opts.push({label:'Pass',action:()=>askSeat(i+1)});
       showModal('Activate a Trap?', `${pName(summonerIdx)} Summoned ${base(card).n}.`, opts);
     } else {
       // simple bot heuristic: always trigger if available
@@ -2474,7 +2515,7 @@ function getActivatableMonsterEffect(card,pIdx,zoneIdx){
         log(`${pIdx===ME?'You':'Bot'} discards a card to draw with ${b.n}.`,pIdx===ME?'me':'opp');
         render();
       };
-      if(pIdx===ME) showModal(b.n,'Discard which card?',G.players[ME].hand.map(c=>({label:base(c).n,card:c,action:()=>doIt(c)})));
+      if(pIdx===ME) askSeatChoice(pIdx,b.n,'Discard which card?',G.players[pIdx].hand.map(c=>({label:base(c).n,card:c,action:()=>doIt(c)})));
       else doIt(G.players[pIdx].hand[0]);
     }};
   }
@@ -2558,14 +2599,14 @@ function triggerFlip(pIdx,card,idx){
     livingSeats().forEach(s=>{ G.players[s].mon.forEach((m,i)=>{ if(m) opts.push({side:s,i}); }); });
     if(opts.length){
       const returnOne=(o)=>{ const m=G.players[o.side].mon[o.i]; G.players[o.side].mon[o.i]=null; G.players[o.side].hand.push(m); log(`Hane-Hane returns ${base(m).n} to hand.`,pIdx===ME?'me':'opp'); render(); };
-      if(pIdx===ME){ showModal('Hane-Hane',"Return which monster to its owner's hand?", opts.map(o=>({label:base(G.players[o.side].mon[o.i]).n+(o.side===ME?' (yours)':` (${pName(o.side)}'s)`), action:()=>returnOne(o)}))); }
+      if(pIdx===ME){ askSeatChoice(pIdx,'Hane-Hane',"Return which monster to its owner's hand?", opts.map(o=>({label:base(G.players[o.side].mon[o.i]).n+(o.side===pIdx?' (yours)':` (${pName(o.side)}'s)`), action:()=>returnOne(o)}))); }
       else returnOne(opts[Math.floor(Math.random()*opts.length)]);
     }
   }
   else if(fx==='magician_of_faith'){
     const spells=G.gy.filter(c=>base(c).cat==='Spell');
     if(spells.length){
-      if(pIdx===ME) showModal('Magician of Faith','Add a Spell from the Graveyard to your hand?', spells.map(c=>({label:base(c).n,action:()=>{ G.gy=G.gy.filter(x=>x.uid!==c.uid); G.players[ME].hand.push(c); render(); }})));
+      if(pIdx===ME) askSeatChoice(pIdx,'Magician of Faith','Add a Spell from the Graveyard to your hand?', spells.map(c=>({label:base(c).n,action:()=>{ G.gy=G.gy.filter(x=>x.uid!==c.uid); G.players[pIdx].hand.push(c); render(); }})));
       else { const c=spells[0]; G.gy=G.gy.filter(x=>x.uid!==c.uid); G.players[pIdx].hand.push(c); render(); }
     }
   }
@@ -2577,11 +2618,11 @@ function triggerFlip(pIdx,card,idx){
       const lowTargets=(opp)=>{ const arr=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && effAtk(m)<=1500 && !m.unaffectedByEffects) arr.push(i); }); return arr; };
       if(pIdx===ME){
         const chooseTarget=(opp)=>{
-          showModal('Old Vindictive Magician','Destroy a monster with 1500 or less ATK?',
+          askSeatChoice(pIdx,'Old Vindictive Magician','Destroy a monster with 1500 or less ATK?',
             lowTargets(opp).map(i=>({label:base(G.players[opp].mon[i]).n,action:()=>doIt(opp,i)})).concat([{label:'Skip',action:()=>{}}]));
         };
         if(eligibleOpponents.length===1) chooseTarget(eligibleOpponents[0]);
-        else showModal('Old Vindictive Magician','Target which opponent?',
+        else askSeatChoice(pIdx,'Old Vindictive Magician','Target which opponent?',
           eligibleOpponents.map(s=>({label:`${pName(s)} (${G.health[s]} HP)`,action:()=>chooseTarget(s)})).concat([{label:'Skip',action:()=>{}}]));
       } else {
         const opp=eligibleOpponents[Math.floor(Math.random()*eligibleOpponents.length)];
@@ -2857,7 +2898,7 @@ function chooseOpponent(pIdx,eligible,cb){
   if(!eligible.length){ cb(null); return; }
   if(eligible.length===1){ cb(eligible[0]); return; }
   if(pIdx===ME){
-    showModal('Choose a Target','Target which opponent?',
+    askSeatChoice(pIdx,'Choose a Target','Target which opponent?',
       eligible.map(s=>({label:`${pName(s)} (${G.health[s]} HP)`,action:()=>cb(s)})));
   } else {
     let best=eligible[0];
@@ -2877,7 +2918,7 @@ function chooseOpponentThenTarget(pIdx,candidateOpponents,getTargets,cb){
     // human even with only one target on the field -- matching this codebase's existing
     // convention (every other targeted effect always shows its picker modal for a human).
     if(pIdx===ME){
-      showModal('Choose a Target',`Target which of ${pName(opp)}'s cards?`,
+      askSeatChoice(pIdx,'Choose a Target',`Target which of ${pName(opp)}'s cards?`,
         targets.map(t=>({label:t.label,action:()=>cb(opp,t.idx)})));
     } else {
       const pick=targets[Math.floor(Math.random()*targets.length)];
@@ -2902,7 +2943,7 @@ function resolveEachPlayerPassLeft(pIdx,card,idx,bonusAtk){
     const opts=allOwnedMonsters(giver);
     const finish=(mi)=>{ picks[giver]=mi; askNext(i+1); };
     if(giver===ME){
-      showModal(base(card).n,`Choose a monster to give to ${pName(nextAliveSeat(ME))} (the player to your left):`,
+      askSeatChoice(giver,base(card).n,`Choose a monster to give to ${pName(nextAliveSeat(giver))} (the player to your left):`,
         opts.map(mi=>({label:base(G.players[giver].mon[mi]).n,action:()=>finish(mi)})));
     } else {
       finish(opts[Math.floor(Math.random()*opts.length)]);
@@ -2926,7 +2967,7 @@ function resolveEachPlayerPassLeft(pIdx,card,idx,bonusAtk){
 }
 function offerTrapActivation(pIdx,idx,card,onYes){
   if(pIdx===ME){
-    showModal(base(card).n,'Activate this Trap?',[
+    askSeatChoice(pIdx,base(card).n,'Activate this Trap?',[
       {label:'Activate',card,action:()=>{ card.faceDown=false; render(); onYes(); }},
       {label:'Skip',card,action:()=>{}},
     ]);
@@ -2998,20 +3039,20 @@ function resolveSpellTrapEffect(pIdx,card,idx){
     case 'monster_reborn': {
       const opts=G.gy.filter(c=>isMonster(c));
       const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.');return;} G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.tempAtk=0; c.equips=[]; G.players[pIdx].mon[z]=c; log(`${pIdx===ME?'You':'Bot'} Special Summoned ${base(c).n} with Monster Reborn.`,pIdx===ME?'me':'opp'); render(); afterAnySummon(pIdx,c,z,false,true); };
-      if(opts.length){ if(pIdx===ME) showModal('Monster Reborn','Choose a monster to Special Summon:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[opts.length-1]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Monster Reborn','Choose a monster to Special Summon:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[opts.length-1]); }
       toGYSelf(); break;
     }
     case 'unexpected_dai': {
       const opts=G.gy.filter(c=>isMonster(c)&&base(c).l<=4);
       const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.');return;} G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.banishOnLeave=true; G.players[pIdx].mon[z]=c; log(`${pIdx===ME?'You':'Bot'} Special Summoned ${base(c).n} with Unexpected Dai.`,pIdx===ME?'me':'opp'); render(); afterAnySummon(pIdx,c,z,false,true); };
-      if(opts.length){ if(pIdx===ME) showModal('Unexpected Dai','Choose a Level 4 or lower monster:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[0]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Unexpected Dai','Choose a Level 4 or lower monster:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[0]); }
       toGYSelf(); break;
     }
     case 'premature_burial': {
       if(G.health[pIdx]<=800){ toast('Not enough Health.'); G.players[pIdx].st[idx]=null; break; }
       const opts=G.gy.filter(c=>isMonster(c));
       const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.'); return;} G.health[pIdx]-=800; G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.equips=['premature_burial']; G.players[pIdx].mon[z]=c; card.faceDown=false; G.players[pIdx].st[idx]=card; render(); log(`${pIdx===ME?'You':'Bot'} pays 800 Health to Special Summon ${base(c).n}.`,pIdx===ME?'me':'opp'); afterAnySummon(pIdx,c,z,false,true); };
-      if(opts.length){ if(pIdx===ME) showModal('Premature Burial','Choose a monster to Special Summon (pay 800 Health):',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[0]); return; }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Premature Burial','Choose a monster to Special Summon (pay 800 Health):',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[0]); return; }
       toGYSelf(); break;
     }
     case 'destroy_1_spelltrap': case 'dust_tornado': {
@@ -3026,14 +3067,14 @@ function resolveSpellTrapEffect(pIdx,card,idx){
         });
         log(`${base(card).n} destroys ${wasFD?'a Set card':base(o.c).n}.`,pIdx===ME?'me':'opp');
       };
-      if(opts.length){ if(pIdx===ME) showModal(base(card).n,'Choose a Spell/Trap to destroy:',opts.map(o=>({label:(o.s===ME?'Your ':pName(o.s)+"'s ")+(o.c.faceDown?'Set Card':base(o.c).n),action:()=>doIt(o)}))); else doIt(opts[Math.floor(Math.random()*opts.length)]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,base(card).n,'Choose a Spell/Trap to destroy:',opts.map(o=>({label:(o.s===ME?'Your ':pName(o.s)+"'s ")+(o.c.faceDown?'Set Card':base(o.c).n),action:()=>doIt(o)}))); else doIt(opts[Math.floor(Math.random()*opts.length)]); }
       toGYSelf(); break;
     }
     case 'cosmic_cyclone': {
       if(G.health[pIdx]<=1000){ toast('Not enough Health.'); G.players[pIdx].st[idx]=null; break; }
       const opts=[]; livingSeats().forEach(s=>{ G.players[s].st.forEach((c,i)=>{ if(c && c.uid!==card.uid) opts.push({s,i,c}); }); });
       const doIt=(o)=>{ G.health[pIdx]-=1000; banish(o.s,o.c,'st',o.i); log(`${base(card).n} banishes a Spell/Trap.`,pIdx===ME?'me':'opp'); render(); };
-      if(opts.length){ if(pIdx===ME) showModal('Cosmic Cyclone','Choose a Spell/Trap to banish (pay 1000 Health):',opts.map(o=>({label:(o.s===ME?'Your ':pName(o.s)+"'s ")+(o.c.faceDown?'Set Card':base(o.c).n),action:()=>doIt(o)}))); else doIt(opts[Math.floor(Math.random()*opts.length)]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Cosmic Cyclone','Choose a Spell/Trap to banish (pay 1000 Health):',opts.map(o=>({label:(o.s===ME?'Your ':pName(o.s)+"'s ")+(o.c.faceDown?'Set Card':base(o.c).n),action:()=>doIt(o)}))); else doIt(opts[Math.floor(Math.random()*opts.length)]); }
       toGYSelf(); break;
     }
     case 'change_of_heart': {
@@ -3055,10 +3096,12 @@ function resolveSpellTrapEffect(pIdx,card,idx){
           log(`${opp===ME?'You pay':pName(opp)+' pays'} 1000 Health — Turtle Tiger negates Change of Heart!`, opp===ME?'me':'opp');
           render();
         };
-        if(opp===ME) showModal('Turtle Tiger','Pay 1000 Health to negate Change of Heart and destroy it?',[
-          {label:'Pay 1000 Health',action:negate},
-          {label:'Allow it',action:proceedSwap},
-        ]);
+        // opp is Turtle Tiger's CONTROLLER, a different real player than pIdx (the one activating
+        // Change of Heart) -- the same third-party-response pattern as attack/trap windows, not a
+        // decision pIdx owns. Online, opp is always a real connected seat (2P scope: never a bot).
+        const turtleOpts=[{label:'Pay 1000 Health',action:negate},{label:'Allow it',action:proceedSwap}];
+        if(onlineMode) askSeatChoice(opp,'Turtle Tiger','Pay 1000 Health to negate Change of Heart and destroy it?',turtleOpts);
+        else if(opp===ME) showModal('Turtle Tiger','Pay 1000 Health to negate Change of Heart and destroy it?',turtleOpts);
         else negate();
       });
       toGYSelf(); break;
@@ -3070,7 +3113,7 @@ function resolveSpellTrapEffect(pIdx,card,idx){
     case 'rush_recklessly': {
       const opts=allOwnedMonsters(pIdx);
       const doIt=(i)=>{ G.players[pIdx].mon[i].tempAtk=(G.players[pIdx].mon[i].tempAtk||0)+700; log('Rush Recklessly: +700 ATK.',pIdx===ME?'me':'opp'); render(); };
-      if(opts.length){ if(pIdx===ME) showModal('Rush Recklessly','Choose a monster to gain 700 ATK:',opts.map(i=>({label:base(G.players[pIdx].mon[i]).n,action:()=>doIt(i)}))); else doIt(opts[0]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Rush Recklessly','Choose a monster to gain 700 ATK:',opts.map(i=>({label:base(G.players[pIdx].mon[i]).n,action:()=>doIt(i)}))); else doIt(opts[0]); }
       toGYSelf(); break;
     }
     case 'jar_of_avarice': {
@@ -3081,7 +3124,7 @@ function resolveSpellTrapEffect(pIdx,card,idx){
     case 'pot_of_duality': {
       const top=G.deck.slice(-3);
       const pick=(c)=>{ G.deck=G.deck.filter(x=>x.uid!==c.uid); G.players[pIdx].hand.push(c); shuffle(G.deck); render(); };
-      if(top.length){ if(pIdx===ME) showModal('Pot of Duality','Add 1 of the top 3 cards to your hand:',top.map(c=>({label:base(c).n,action:()=>pick(c)}))); else pick(top[0]); }
+      if(top.length){ if(pIdx===ME) askSeatChoice(pIdx,'Pot of Duality','Add 1 of the top 3 cards to your hand:',top.map(c=>({label:base(c).n,action:()=>pick(c)}))); else pick(top[0]); }
       toGYSelf(); break;
     }
     case 'trap_stun': G.trapStunTurn=G.turnNum+'_'+G.active; log('Trap Stun negates all face-up Trap effects this turn.','sys'); toGYSelf(); break;
@@ -3105,7 +3148,7 @@ function resolveSpellTrapEffect(pIdx,card,idx){
         render();
         afterAnySummon(pIdx,c,z,false,true);
       };
-      if(opts.length){ if(pIdx===ME) showModal('Call of the Haunted','Special Summon a monster from the Graveyard:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[opts.length-1]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Call of the Haunted','Special Summon a monster from the Graveyard:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[opts.length-1]); }
       /* continuous: stays face-up on the field, not sent to GY */
       break;
     }
@@ -3118,7 +3161,7 @@ function resolveSpellTrapEffect(pIdx,card,idx){
         log(`${base(card).n} equips to ${base(m).n}.`, pIdx===ME?'me':'opp');
         render();
       };
-      if(opts.length){ if(pIdx===ME) showModal(base(card).n,'Equip to which of your monsters?',opts.map(i=>({label:base(G.players[pIdx].mon[i]).n,action:()=>doIt(i)}))); else doIt(opts[0]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,base(card).n,'Equip to which of your monsters?',opts.map(i=>({label:base(G.players[pIdx].mon[i]).n,action:()=>doIt(i)}))); else doIt(opts[0]); }
       else { toast('No monster to equip.'); toGYSelf(); }
       /* stays on field face-up as an Equip Spell; not sent to GY here */
       break;
