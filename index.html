@@ -651,6 +651,7 @@ button{font-family:inherit;cursor:pointer;}
 <div id="gameover-bg">
   <h1 id="go-title">Victory!</h1>
   <p id="go-sub" style="color:var(--dim)"></p>
+  <button class="abtn" onclick="showLogModal()">View Game Log</button>
   <button class="abtn primary" onclick="location.reload()">Play Again</button>
 </div>
 
@@ -931,7 +932,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v67';
+const GAME_VERSION='v68';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
