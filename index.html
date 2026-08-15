@@ -85,17 +85,17 @@ button{font-family:inherit;cursor:pointer;}
 @keyframes diespin{0%{transform:rotate(0)}70%{transform:rotate(720deg)}100%{transform:rotate(1080deg)}}
 #version-tag{position:absolute;right:8px;bottom:8px;text-align:right;
   font-size:.68em;color:var(--dim);opacity:.6;pointer-events:none;}
-#recache-btn,#desktop-mode-btn{margin:14px 0 0;
+#recache-btn,#desktop-mode-btn,#lock-ui-btn{margin:14px 0 0;
   background:#16281c;border:1px solid var(--gold-dim);color:var(--dim);
   font-size:.72em;padding:5px 14px;border-radius:14px;white-space:nowrap;}
-#recache-btn:hover,#desktop-mode-btn:hover{border-color:var(--gold);color:var(--ink);}
+#recache-btn:hover,#desktop-mode-btn:hover,#lock-ui-btn:hover{border-color:var(--gold);color:var(--ink);}
 #recache-btn:disabled{opacity:.6;}
-#desktop-mode-btn{display:inline-flex;align-items:center;gap:5px;}
-#desktop-mode-check{font-size:1.15em;line-height:1;}
+#desktop-mode-btn,#lock-ui-btn{display:inline-flex;align-items:center;gap:5px;}
+#desktop-mode-check,#lock-ui-check{font-size:1.15em;line-height:1;}
 /* "on" gets the same gold-accent treatment used elsewhere for an active toggle (e.g. .mode-tab.sel)
    plus a filled checkmark glyph, swapped in by JS -- the empty/checked box alone was too easy to
    miss at a glance, this needs to read as clearly on/off from across the room. */
-#desktop-mode-btn.on{border-color:var(--gold);background:#1c2c1e;color:var(--gold);}
+#desktop-mode-btn.on,#lock-ui-btn.on{border-color:var(--gold);background:#1c2c1e;color:var(--gold);}
 
 /* ---------- BOARD ---------- */
 #game-root{display:none;position:relative;height:100%;background:
@@ -236,19 +236,25 @@ button{font-family:inherit;cursor:pointer;}
    solo-page padding reclaim above there's meaningfully more width per panel here than the shared
    .compact baseline assumes -- size cards up to actually fill it instead of leaving it as
    unused whitespace around small cards. */
-/* The 40px/38px ceilings this used to have are sized for a mobile-width frame (~393px, where the
-   10.3cqw/9.9cqw preferred values land at almost exactly those numbers anyway, so raising them
-   changes nothing there) -- Desktop Mode's 4-player grid runs the frame up to 820px wide, where
-   the same cqw math wants ~85px zones but was getting clamped down to 40px, leaving the panel's
-   real estate mostly empty around tiny cards.
+.table-dual-top .zone-row.compact .zone{width:clamp(28px,10.3cqw,40px);height:clamp(44px,16.2cqw,63px);}
+.table-dual-top .hand-row.compact .card{width:clamp(27px,9.9cqw,38px);height:clamp(42px,15.9cqw,62px);}
+/* The ceilings above are sized for a mobile-width frame (~393px, where the 10.3cqw/9.9cqw preferred
+   values land at almost exactly those numbers anyway) -- explicit Desktop Mode runs the frame up to
+   820px wide, where the same cqw math wants ~85px zones but was getting clamped down to 40px,
+   leaving the panel's real estate mostly empty around tiny cards. Raised ONLY under body's
+   desktop-mode-on marker (set by setDesktopMode(), never by the separate 4P zoom-out toggle) --
+   that toggle reuses this exact same .table-dual-top layout via a CSS `zoom` transform instead of a
+   real width/height frame resize, an untested combination this project has never verified doesn't
+   do something unexpected with container-query units on some browser; scoping the raised ceiling
+   to real Desktop Mode only keeps that separate, never-enlarged path exactly as it's always been.
    Height can't just follow the same cqw-based formula once raised, though: Desktop Mode's 4P grid
    sizes width and height independently (a real monitor can land on a wide-but-short window, e.g.
-   820x720 rather than the 820x900 square cap), and a cqw-only height doesn't shrink at all when
-   the frame gets shorter -- it only overflowed once the ceiling was high enough to matter. Taking
-   the min() against a cqh-based term makes height actually respond to the frame's real available
-   height too, so it shrinks along with a short window instead of overflowing the panel. */
-.table-dual-top .zone-row.compact .zone{width:clamp(28px,10.3cqw,67px);height:clamp(44px,min(16.2cqw,10.5cqh),105px);}
-.table-dual-top .hand-row.compact .card{width:clamp(27px,9.9cqw,60px);height:clamp(42px,min(15.9cqw,10.3cqh),98px);}
+   820x720 rather than the 820x900 square cap), and a cqw-only height doesn't shrink at all when the
+   frame gets shorter -- it only overflowed once the ceiling was high enough to matter. Taking the
+   min() against a cqh-based term makes height actually respond to the frame's real available height
+   too, so it shrinks along with a short window instead of overflowing the panel. */
+body.desktop-mode-on .table-dual-top .zone-row.compact .zone{width:clamp(28px,10.3cqw,67px);height:clamp(44px,min(16.2cqw,10.5cqh),105px);}
+body.desktop-mode-on .table-dual-top .hand-row.compact .card{width:clamp(27px,9.9cqw,60px);height:clamp(42px,min(15.9cqw,10.3cqh),98px);}
 
 .hand-row{display:flex;justify-content:center;gap:clamp(3px,1.2cqw,6px);flex:0 0 auto;padding:4px 0;
   min-height:clamp(66px,18.4cqw,106px);align-items:flex-end;flex-wrap:wrap;}
@@ -623,6 +629,7 @@ button{font-family:inherit;cursor:pointer;}
     <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
       <button id="recache-btn" type="button">↻ Force Refresh</button>
       <button id="desktop-mode-btn" type="button"><span id="desktop-mode-check">☐</span> Desktop Mode</button>
+      <button id="lock-ui-btn" type="button" title="Forces the original guaranteed-fit sizing, ignoring device/orientation detection and Desktop Mode -- use this if the board ever looks wrong or oversized on your device."><span id="lock-ui-check">☐</span> Lock UI (Safe Mode)</button>
     </div>
   </div>
   <div id="coin-flip-wrap">
@@ -761,9 +768,46 @@ const DESKTOP_MAX_W=520;
 const DESKTOP_MODE_MAX_W=820, DESKTOP_MODE_MAX_H_SQUARE=900;
 let desktopMode=false;
 try{ desktopMode=localStorage.getItem('sy_desktopMode')==='1'; }catch{}
+document.body.classList.toggle('desktop-mode-on',desktopMode);
 function setDesktopMode(on){
   desktopMode=on;
   try{ localStorage.setItem('sy_desktopMode', on?'1':'0'); }catch{}
+  document.body.classList.toggle('desktop-mode-on',on);
+  applyFrameScale();
+  if(typeof buildTableView==='function' && document.getElementById('game-root').style.display!=='none') buildTableView();
+}
+// Lock UI (Safe Mode): a deliberate escape hatch for any device/browser combination the size-
+// detection heuristics above get wrong (auto-detected desktop vs. phone-shaped, Desktop Mode's
+// independent-width/height 4-player grid, the 4P zoom-out toggle's CSS `zoom` trick) -- forces the
+// exact same guaranteed-fit CSS-transform-scale sizing the phone branch already uses, unconditionally,
+// bypassing pointer/orientation detection and Desktop Mode entirely. Takes absolute precedence in
+// applyFrameScale() (checked first), and also turns off the 4P zoom-out toggle's `.zoomed-out` CSS-
+// zoom trick, since that's a second, independent source of the same class of sizing risk.
+let lockUI=false;
+try{ lockUI=localStorage.getItem('sy_lockUI')==='1'; }catch{}
+function setLockUI(on){
+  lockUI=on;
+  try{ localStorage.setItem('sy_lockUI', on?'1':'0'); }catch{}
+  // Desktop Mode also independently feeds buildTableView()'s zoomedFourP check (the 4-player
+  // dual-panel grid), separate from applyFrameScale()'s own frame sizing -- neutralize it too, not
+  // just override the frame size, so Lock UI actually turns off every path into that layout.
+  if(on && desktopMode){
+    setDesktopMode(false);
+    const dBtn=document.getElementById('desktop-mode-btn'), dCheck=document.getElementById('desktop-mode-check');
+    if(dBtn) dBtn.classList.remove('on');
+    if(dCheck) dCheck.textContent='☐';
+  }
+  const zoomBtn=document.getElementById('zoom-toggle-btn'), wrap=document.getElementById('board-wrap');
+  if(on && wrap.classList.contains('zoomed-out')){
+    wrap.classList.remove('zoomed-out');
+    zoomBtn.classList.remove('active');
+    zoomBtn.title='Zoom Out to See Whole Board';
+  }
+  if(zoomBtn){
+    let numPlayers=0;
+    try{ numPlayers=G.numPlayers; }catch(e){}
+    zoomBtn.style.display = (on || numPlayers!==4) ? 'none' : 'flex';
+  }
   applyFrameScale();
   if(typeof buildTableView==='function' && document.getElementById('game-root').style.display!=='none') buildTableView();
 }
@@ -782,7 +826,7 @@ function applyFrameScale(){
   // the board's own layout is built portrait-first. desktopMode forces the desktop branch
   // regardless of actual device shape (see setDesktopMode()).
   const isPhoneShaped = !desktopMode && coarsePointer && vh>=vw*1.4;
-  if(isPhoneShaped){
+  if(lockUI || isPhoneShaped){
     currentFrameScale=Math.min(vw/FRAME_W, vh/FRAME_H, 1);
     gameFrame.style.width=FRAME_W+'px';
     gameFrame.style.height=FRAME_H+'px';
@@ -1117,7 +1161,7 @@ function receiveOnlineRelay(fromSeat,payload){
       document.getElementById('board').classList.toggle('two-player-mode',G.numPlayers===2);
       document.getElementById('board-wrap').classList.toggle('two-player-mode',G.numPlayers===2);
       applyFrameScale();
-      document.getElementById('zoom-toggle-btn').style.display=G.numPlayers===4?'flex':'none';
+      document.getElementById('zoom-toggle-btn').style.display=(G.numPlayers===4 && !lockUI)?'flex':'none';
       document.getElementById('board-wrap').classList.remove('zoomed-out');
       document.getElementById('zoom-toggle-btn').classList.remove('active');
       buildOpponentPanels();
@@ -1181,7 +1225,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v85';
+const GAME_VERSION='v86';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1211,6 +1255,24 @@ document.getElementById('recache-btn').addEventListener('click',async()=>{
   btn.addEventListener('click',()=>{
     setDesktopMode(!desktopMode);
     paint();
+  });
+})();
+(function initLockUIBtn(){
+  const btn=document.getElementById('lock-ui-btn');
+  const check=document.getElementById('lock-ui-check');
+  const paint=()=>{
+    btn.classList.toggle('on',lockUI);
+    check.textContent=lockUI?'☑':'☐';
+  };
+  paint();
+  btn.addEventListener('click',()=>{
+    setLockUI(!lockUI);
+    paint();
+    // setLockUI may have also turned Desktop Mode off -- repaint that button too so it doesn't show
+    // stale "on" state.
+    const dBtn=document.getElementById('desktop-mode-btn'), dCheck=document.getElementById('desktop-mode-check');
+    dBtn.classList.toggle('on',desktopMode);
+    dCheck.textContent=desktopMode?'☑':'☐';
   });
 })();
 /* ============================= CARD DATABASE ============================= */
@@ -1707,7 +1769,7 @@ function beginDuel(){
   document.getElementById('board').classList.toggle('two-player-mode',G.numPlayers===2);
   document.getElementById('board-wrap').classList.toggle('two-player-mode',G.numPlayers===2);
   applyFrameScale();
-  document.getElementById('zoom-toggle-btn').style.display=G.numPlayers===4?'flex':'none';
+  document.getElementById('zoom-toggle-btn').style.display=(G.numPlayers===4 && !lockUI)?'flex':'none';
   document.getElementById('board-wrap').classList.remove('zoomed-out');
   document.getElementById('zoom-toggle-btn').classList.remove('active');
   G.health=Array(G.numPlayers).fill(G.startHealth);
