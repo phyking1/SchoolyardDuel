@@ -85,17 +85,20 @@ button{font-family:inherit;cursor:pointer;}
 @keyframes diespin{0%{transform:rotate(0)}70%{transform:rotate(720deg)}100%{transform:rotate(1080deg)}}
 #version-tag{position:absolute;right:8px;bottom:8px;text-align:right;
   font-size:.68em;color:var(--dim);opacity:.6;pointer-events:none;}
-#recache-btn,#desktop-mode-btn,#lock-ui-btn{margin:14px 0 0;
-  background:#16281c;border:1px solid var(--gold-dim);color:var(--dim);
-  font-size:.72em;padding:5px 14px;border-radius:14px;white-space:nowrap;}
-#recache-btn:hover,#desktop-mode-btn:hover,#lock-ui-btn:hover{border-color:var(--gold);color:var(--ink);}
+/* Window Mode: the three ways the board can size itself (Default Stretched / Desktop / Fixed Safe)
+   are mutually exclusive, so they're one labeled tab group -- reusing .mode-tabs/.mode-tab (the same
+   Vs Bots/Online control) rather than three independent toggle buttons, so "exactly one of these is
+   active" reads visually the same way it already does elsewhere on this screen, and the existing
+   .mode-tab.sel gold-highlight is reused for free instead of a separate on/off treatment per button. */
+#window-mode-wrap{display:flex;flex-direction:column;align-items:center;gap:7px;margin-top:14px;}
+.window-mode-label{font-size:.66em;font-weight:700;letter-spacing:1.5px;text-transform:uppercase;
+  color:var(--dim);}
+.window-mode-tabs{gap:6px;flex-wrap:wrap;max-width:340px;}
+.window-mode-tab{padding:6px 12px;font-size:.7em;border-radius:14px;}
+#recache-btn{margin:4px 0 0;background:#16281c;border:1px solid var(--gold-dim);color:var(--dim);
+  font-size:.66em;padding:4px 12px;border-radius:14px;white-space:nowrap;}
+#recache-btn:hover{border-color:var(--gold);color:var(--ink);}
 #recache-btn:disabled{opacity:.6;}
-#desktop-mode-btn,#lock-ui-btn{display:inline-flex;align-items:center;gap:5px;}
-#desktop-mode-check,#lock-ui-check{font-size:1.15em;line-height:1;}
-/* "on" gets the same gold-accent treatment used elsewhere for an active toggle (e.g. .mode-tab.sel)
-   plus a filled checkmark glyph, swapped in by JS -- the empty/checked box alone was too easy to
-   miss at a glance, this needs to read as clearly on/off from across the room. */
-#desktop-mode-btn.on,#lock-ui-btn.on{border-color:var(--gold);background:#1c2c1e;color:var(--gold);}
 
 /* Lock UI's px overrides: on real hardware capped below Safari/iPadOS 16 (e.g. iPad mini 4, stuck
    at iPadOS 15.8 -- Apple's last update for that model), CSS Container Query units (cqw/cqh) don't
@@ -700,11 +703,14 @@ body.desktop-mode-on .table-dual-top .hand-row.compact .card{width:clamp(27px,9.
         <button id="online-cancel-btn" type="button">Leave Room</button>
       </div>
     </div>
-    <div style="height:10px"></div>
-    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+    <div id="window-mode-wrap">
+      <div class="window-mode-label">Window Mode</div>
+      <div class="mode-tabs window-mode-tabs">
+        <button type="button" class="mode-tab window-mode-tab" data-window-mode="default" title="Automatically fills your window or device screen -- the standard experience for most players.">Default Stretched Mode</button>
+        <button type="button" class="mode-tab window-mode-tab" data-window-mode="desktop" title="Bigger cards and an expanded 4-player grid layout, sized for large desktop windows.">Desktop Mode</button>
+        <button type="button" class="mode-tab window-mode-tab" data-window-mode="fixed" title="Locks the board to a fixed resolution that always renders correctly -- use this if the board ever looks wrong, oversized, or overlapping on your device.">Fixed (Safe) Mode</button>
+      </div>
       <button id="recache-btn" type="button">↻ Force Refresh</button>
-      <button id="desktop-mode-btn" type="button"><span id="desktop-mode-check">☐</span> Desktop Mode</button>
-      <button id="lock-ui-btn" type="button" title="Forces the original guaranteed-fit sizing, ignoring device/orientation detection and Desktop Mode -- use this if the board ever looks wrong or oversized on your device."><span id="lock-ui-check">☐</span> Lock UI (Safe Mode)</button>
     </div>
   </div>
   <div id="coin-flip-wrap">
@@ -873,9 +879,6 @@ function setLockUI(on){
   // just override the frame size, so Lock UI actually turns off every path into that layout.
   if(on && desktopMode){
     setDesktopMode(false);
-    const dBtn=document.getElementById('desktop-mode-btn'), dCheck=document.getElementById('desktop-mode-check');
-    if(dBtn) dBtn.classList.remove('on');
-    if(dCheck) dCheck.textContent='☐';
   }
   const zoomBtn=document.getElementById('zoom-toggle-btn'), wrap=document.getElementById('board-wrap');
   if(on && wrap.classList.contains('zoomed-out')){
@@ -1305,7 +1308,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v88';
+const GAME_VERSION='v89';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 // Shared by the "↻ Force Refresh" button and Lock UI (Safe Mode) -- see hardRefresh()'s own comment
 // on why turning Lock UI on also forces this.
@@ -1329,44 +1332,39 @@ document.getElementById('recache-btn').addEventListener('click',async()=>{
   btn.disabled=true; btn.textContent='Refreshing…';
   await hardRefresh();
 });
-(function initDesktopModeBtn(){
-  const btn=document.getElementById('desktop-mode-btn');
-  const check=document.getElementById('desktop-mode-check');
-  const paint=()=>{
-    btn.classList.toggle('on',desktopMode);
-    check.textContent=desktopMode?'☑':'☐';
-  };
-  paint();
-  btn.addEventListener('click',()=>{
-    setDesktopMode(!desktopMode);
-    paint();
+// Window Mode: a single 3-way tab group over the two independent desktopMode/lockUI booleans above
+// (their own setters already keep each other mutually exclusive -- setLockUI(true) turns desktopMode
+// off; setWindowMode mirrors that the other direction so switching straight from Fixed to Desktop, or
+// either to Default, always lands in a clean single-mode state, never a stale double-on one).
+function currentWindowMode(){ return lockUI ? 'fixed' : (desktopMode ? 'desktop' : 'default'); }
+function paintWindowModeTabs(){
+  const mode=currentWindowMode();
+  document.querySelectorAll('.window-mode-tab').forEach(btn=>{
+    btn.classList.toggle('sel', btn.dataset.windowMode===mode);
   });
-})();
-(function initLockUIBtn(){
-  const btn=document.getElementById('lock-ui-btn');
-  const check=document.getElementById('lock-ui-check');
-  const paint=()=>{
-    btn.classList.toggle('on',lockUI);
-    check.textContent=lockUI?'☑':'☐';
-  };
-  paint();
-  btn.addEventListener('click',()=>{
-    const turningOn=!lockUI;
-    setLockUI(turningOn);
-    paint();
-    // setLockUI may have also turned Desktop Mode off -- repaint that button too so it doesn't show
-    // stale "on" state.
-    const dBtn=document.getElementById('desktop-mode-btn'), dCheck=document.getElementById('desktop-mode-check');
-    dBtn.classList.toggle('on',desktopMode);
-    dCheck.textContent=desktopMode?'☑':'☐';
-    // Turning Lock UI ON is the "something is rendering wrong, get me back to a known-good state"
-    // panic button -- if the reason the fixed-frame sizing above isn't taking effect is that the
+}
+function setWindowMode(mode){
+  if(mode==='fixed'){
+    setLockUI(true);
+    paintWindowModeTabs();
+    // Turning Fixed (Safe) Mode on is the "something is rendering wrong, get me back to a known-good
+    // state" panic button -- if the reason the fixed-frame sizing doesn't take effect is that the
     // device is still running JS cached from before this feature existed (this project has a known,
     // pre-existing stale-cache problem -- see the "↻ Force Refresh" button), toggling the setting
     // alone can't fix that: stale code can't know to read the new sy_lockUI flag. Force the same
     // cache-clear + cache-busted reload #recache-btn does, so the very next load is guaranteed to run
     // current code with lockUI already true from localStorage.
-    if(turningOn) hardRefresh();
+    hardRefresh();
+    return;
+  }
+  if(lockUI) setLockUI(false);
+  setDesktopMode(mode==='desktop');
+  paintWindowModeTabs();
+}
+(function initWindowModeTabs(){
+  paintWindowModeTabs();
+  document.querySelectorAll('.window-mode-tab').forEach(btn=>{
+    btn.addEventListener('click',()=>{ setWindowMode(btn.dataset.windowMode); });
   });
 })();
 /* ============================= CARD DATABASE ============================= */
