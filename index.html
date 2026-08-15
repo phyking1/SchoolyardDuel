@@ -1308,7 +1308,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v89';
+const GAME_VERSION='v90';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 // Shared by the "↻ Force Refresh" button and Lock UI (Safe Mode) -- see hardRefresh()'s own comment
 // on why turning Lock UI on also forces this.
@@ -2332,7 +2332,7 @@ function triggerOnSentToGY(pIdx,card){
     } else {
       askSeatChoice(pIdx,'Witch of the Black Forest','Add 1 monster with 1500 or less DEF from your Deck to your hand?',[
         {label:'Search',action:()=>{
-          askSeatChoice(pIdx,'Witch of the Black Forest','Choose which monster to add:',opts.map(o=>({label:base(o.c).n,action:()=>pick(o.c)})));
+          askSeatChoice(pIdx,'Witch of the Black Forest','Choose which monster to add:',opts.map(o=>({label:base(o.c).n,card:o.c,action:()=>pick(o.c)})));
         }},
         {label:'Skip',action:()=>{}},
       ]);
@@ -2862,6 +2862,12 @@ function openMultiPickModal(title,hint,options,max,onConfirm){
     const name=document.createElement('span'); name.className='clr-name'; name.textContent=o.label;
     const tag=document.createElement('span'); tag.className='clr-tag'; tag.textContent=o.tag||'';
     row.append(check,icon,name,tag);
+    if(o.card){
+      const peek=document.createElement('button'); peek.type='button'; peek.className='mopt-peek'; peek.title='View card';
+      peek.textContent='👁';
+      peek.addEventListener('click',(e)=>{ e.stopPropagation(); showCardPopup(o.card,false); });
+      row.appendChild(peek);
+    }
     row.addEventListener('click',()=>{
       if(selected.has(o.id)){ selected.delete(o.id); row.classList.remove('checked'); check.textContent='⬜'; }
       else { if(selected.size>=max){ toast(`You can only pick up to ${max}.`); return; } selected.add(o.id); row.classList.add('checked'); check.textContent='✅'; }
@@ -3087,7 +3093,7 @@ function afterSummon(pIdx,card,idx){
       if(pIdx===ME){
         const chooseTarget=(opp)=>{
           askSeatChoice(pIdx,'Hunter Dragon','Destroy a face-up Defense Position monster?',
-            defTargets(opp).map(i=>({label:base(G.players[opp].mon[i]).n,action:()=>doIt(opp,i)})).concat([{label:'Skip',action:()=>{}}]));
+            defTargets(opp).map(i=>({label:base(G.players[opp].mon[i]).n,card:G.players[opp].mon[i],action:()=>doIt(opp,i)})).concat([{label:'Skip',action:()=>{}}]));
         };
         if(eligibleOpponents.length===1) chooseTarget(eligibleOpponents[0]);
         else askSeatChoice(pIdx,'Hunter Dragon','Target which opponent?',
@@ -3320,14 +3326,14 @@ function triggerFlip(pIdx,card,idx,onDone){
       // performBattle may be resolving on behalf of a remote seat (see resolveAttackFor's
       // actingAsSeat, which has already closed and reverted ME by the time a flipped monster's own
       // async choice would fire). Same pattern as Phase 1's chooseOpponent fix.
-      if(!G.isBot[pIdx]){ askSeatChoice(pIdx,'Hane-Hane',"Return which monster to its owner's hand?", opts.map(o=>({label:base(G.players[o.side].mon[o.i]).n+(o.side===pIdx?' (yours)':` (${pName(o.side)}'s)`), action:()=>returnOne(o)}))); }
+      if(!G.isBot[pIdx]){ askSeatChoice(pIdx,'Hane-Hane',"Return which monster to its owner's hand?", opts.map(o=>({label:base(G.players[o.side].mon[o.i]).n+(o.side===pIdx?' (yours)':` (${pName(o.side)}'s)`), card:G.players[o.side].mon[o.i], action:()=>returnOne(o)}))); }
       else returnOne(opts[Math.floor(Math.random()*opts.length)]);
     } else done();
   }
   else if(fx==='magician_of_faith'){
     const spells=G.gy.filter(c=>base(c).cat==='Spell');
     if(spells.length){
-      if(!G.isBot[pIdx]) askSeatChoice(pIdx,'Magician of Faith','Add a Spell from the Graveyard to your hand?', spells.map(c=>({label:base(c).n,action:()=>{ G.gy=G.gy.filter(x=>x.uid!==c.uid); G.players[pIdx].hand.push(c); render(); done(); }})));
+      if(!G.isBot[pIdx]) askSeatChoice(pIdx,'Magician of Faith','Add a Spell from the Graveyard to your hand?', spells.map(c=>({label:base(c).n,card:c,action:()=>{ G.gy=G.gy.filter(x=>x.uid!==c.uid); G.players[pIdx].hand.push(c); render(); done(); }})));
       else { const c=spells[0]; G.gy=G.gy.filter(x=>x.uid!==c.uid); G.players[pIdx].hand.push(c); render(); done(); }
     } else done();
   }
@@ -3340,7 +3346,7 @@ function triggerFlip(pIdx,card,idx,onDone){
       if(!G.isBot[pIdx]){
         const chooseTarget=(opp)=>{
           askSeatChoice(pIdx,'Old Vindictive Magician','Destroy a monster with 1500 or less ATK?',
-            lowTargets(opp).map(i=>({label:base(G.players[opp].mon[i]).n,action:()=>doIt(opp,i)})).concat([{label:'Skip',action:()=>done()}]));
+            lowTargets(opp).map(i=>({label:base(G.players[opp].mon[i]).n,card:G.players[opp].mon[i],action:()=>doIt(opp,i)})).concat([{label:'Skip',action:()=>done()}]));
         };
         if(eligibleOpponents.length===1) chooseTarget(eligibleOpponents[0]);
         else askSeatChoice(pIdx,'Old Vindictive Magician','Target which opponent?',
@@ -3378,7 +3384,7 @@ function triggerFlip(pIdx,card,idx,onDone){
     if(opts.length){
       const pick=(chosen)=>{ G.deck=G.deck.filter(c=>c.uid!==chosen.uid); G.players[pIdx].hand.push(chosen); shuffleAfterSearch(); log(`${pIdx===ME?'You add':pName(pIdx)+' adds'} ${base(chosen).n} to hand (Oppressed People).`,pIdx===ME?'me':'opp'); render(); done(); };
       if(G.isBot[pIdx]) pick(opts[Math.floor(Math.random()*opts.length)].c);
-      else askSeatChoice(pIdx,'Oppressed People','Add which monster (1000 ATK or less) to your hand?',opts.map(o=>({label:base(o.c).n,action:()=>pick(o.c)})));
+      else askSeatChoice(pIdx,'Oppressed People','Add which monster (1000 ATK or less) to your hand?',opts.map(o=>({label:base(o.c).n,card:o.c,action:()=>pick(o.c)})));
     } else done();
   }
   else done();
@@ -3667,8 +3673,11 @@ function chooseOpponentThenTarget(pIdx,candidateOpponents,getTargets,cb){
       const pick=targets[Math.floor(Math.random()*targets.length)];
       cb(opp,pick.idx);
     } else {
+      // card: lets the picker peek at the actual card before committing -- every getTargets() caller
+      // above only ever returns monster-zone indices, so G.players[opp].mon[t.idx] is always the real
+      // target card (safe to show: its label already reveals its name either way).
       askSeatChoice(pIdx,'Choose a Target',`Target which of ${pName(opp)}'s cards?`,
-        targets.map(t=>({label:t.label,action:()=>cb(opp,t.idx)})));
+        targets.map(t=>({label:t.label,card:G.players[opp].mon[t.idx],action:()=>cb(opp,t.idx)})));
     }
   });
 }
@@ -3695,7 +3704,7 @@ function resolveEachPlayerPassLeft(pIdx,card,idx,bonusAtk){
       finish(opts[Math.floor(Math.random()*opts.length)]);
     } else {
       askSeatChoice(giver,base(card).n,`Choose a monster to give to ${pName(nextAliveSeat(giver))} (the player to your left):`,
-        opts.map(mi=>({label:base(G.players[giver].mon[mi]).n,action:()=>finish(mi)})));
+        opts.map(mi=>({label:base(G.players[giver].mon[mi]).n,card:G.players[giver].mon[mi],action:()=>finish(mi)})));
     }
   };
   const applyPasses=()=>{
@@ -3790,13 +3799,13 @@ function resolveSpellTrapEffect(pIdx,card,idx){
     case 'monster_reborn': {
       const opts=G.gy.filter(c=>isMonster(c));
       const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.');return;} G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.tempAtk=0; c.equips=[]; G.players[pIdx].mon[z]=c; log(`${pIdx===ME?'You':'Bot'} Special Summoned ${base(c).n} with Monster Reborn.`,pIdx===ME?'me':'opp'); render(); afterAnySummon(pIdx,c,z,false,true); };
-      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Monster Reborn','Choose a monster to Special Summon:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[opts.length-1]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Monster Reborn','Choose a monster to Special Summon:',opts.map(c=>({label:base(c).n,card:c,action:()=>place(c)}))); else place(opts[opts.length-1]); }
       toGYSelf(); break;
     }
     case 'unexpected_dai': {
       const opts=G.gy.filter(c=>isMonster(c)&&base(c).l<=4);
       const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.');return;} G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.banishOnLeave=true; G.players[pIdx].mon[z]=c; log(`${pIdx===ME?'You':'Bot'} Special Summoned ${base(c).n} with Unexpected Dai.`,pIdx===ME?'me':'opp'); render(); afterAnySummon(pIdx,c,z,false,true); };
-      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Unexpected Dai','Choose a Level 4 or lower monster:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[0]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Unexpected Dai','Choose a Level 4 or lower monster:',opts.map(c=>({label:base(c).n,card:c,action:()=>place(c)}))); else place(opts[0]); }
       toGYSelf(); break;
     }
     case 'premature_burial': {
@@ -3810,7 +3819,7 @@ function resolveSpellTrapEffect(pIdx,card,idx){
         card.faceDown=false; card.equippedSide=pIdx; card.equippedIdx=z; G.players[pIdx].st[idx]=card;
         render(); log(`${pIdx===ME?'You':'Bot'} pays 800 Health to Special Summon ${base(c).n}.`,pIdx===ME?'me':'opp'); afterAnySummon(pIdx,c,z,false,true);
       };
-      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Premature Burial','Choose a monster to Special Summon (pay 800 Health):',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[0]); return; }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Premature Burial','Choose a monster to Special Summon (pay 800 Health):',opts.map(c=>({label:base(c).n,card:c,action:()=>place(c)}))); else place(opts[0]); return; }
       toGYSelf(); break;
     }
     case 'destroy_1_spelltrap': case 'dust_tornado': {
@@ -3825,7 +3834,10 @@ function resolveSpellTrapEffect(pIdx,card,idx){
         });
         log(`${base(card).n} destroys ${wasFD?'a Set card':base(o.c).n}.`,pIdx===ME?'me':'opp');
       };
-      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,base(card).n,'Choose a Spell/Trap to destroy:',opts.map(o=>({label:(o.s===ME?'Your ':pName(o.s)+"'s ")+(o.c.faceDown?'Set Card':base(o.c).n),action:()=>doIt(o)}))); else doIt(opts[Math.floor(Math.random()*opts.length)]); }
+      // Peek is only offered for a card whose identity the picker already legitimately knows -- their
+      // own Set cards, or anything already face-up. An opponent's face-down Set card stays truly
+      // hidden, same as targeting one for real: the peek button must never be the thing that leaks it.
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,base(card).n,'Choose a Spell/Trap to destroy:',opts.map(o=>({label:(o.s===ME?'Your ':pName(o.s)+"'s ")+(o.c.faceDown?'Set Card':base(o.c).n),card:(!o.c.faceDown||o.s===pIdx)?o.c:null,action:()=>doIt(o)}))); else doIt(opts[Math.floor(Math.random()*opts.length)]); }
       toGYSelf(); break;
     }
     case 'cosmic_cyclone': {
@@ -3833,7 +3845,9 @@ function resolveSpellTrapEffect(pIdx,card,idx){
       if(G.health[pIdx]<=1000){ toast('Not enough Health.'); G.players[pIdx].hand.push(card); G.players[pIdx].st[idx]=null; render(); break; }
       const opts=[]; livingSeats().forEach(s=>{ G.players[s].st.forEach((c,i)=>{ if(c && c.uid!==card.uid) opts.push({s,i,c}); }); });
       const doIt=(o)=>{ G.health[pIdx]-=1000; banish(o.s,o.c,'st',o.i); log(`${base(card).n} banishes a Spell/Trap.`,pIdx===ME?'me':'opp'); render(); };
-      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Cosmic Cyclone','Choose a Spell/Trap to banish (pay 1000 Health):',opts.map(o=>({label:(o.s===ME?'Your ':pName(o.s)+"'s ")+(o.c.faceDown?'Set Card':base(o.c).n),action:()=>doIt(o)}))); else doIt(opts[Math.floor(Math.random()*opts.length)]); }
+      // Same hidden-information rule as destroy_1_spelltrap/dust_tornado above: peek only when the
+      // picker already legitimately knows the card (their own, or already face-up).
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Cosmic Cyclone','Choose a Spell/Trap to banish (pay 1000 Health):',opts.map(o=>({label:(o.s===ME?'Your ':pName(o.s)+"'s ")+(o.c.faceDown?'Set Card':base(o.c).n),card:(!o.c.faceDown||o.s===pIdx)?o.c:null,action:()=>doIt(o)}))); else doIt(opts[Math.floor(Math.random()*opts.length)]); }
       toGYSelf(); break;
     }
     case 'change_of_heart': {
@@ -3879,7 +3893,7 @@ function resolveSpellTrapEffect(pIdx,card,idx){
     case 'rush_recklessly': {
       const opts=allOwnedMonsters(pIdx);
       const doIt=(i)=>{ G.players[pIdx].mon[i].tempAtk=(G.players[pIdx].mon[i].tempAtk||0)+700; log('Rush Recklessly: +700 ATK.',pIdx===ME?'me':'opp'); render(); };
-      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Rush Recklessly','Choose a monster to gain 700 ATK:',opts.map(i=>({label:base(G.players[pIdx].mon[i]).n,action:()=>doIt(i)}))); else doIt(opts[0]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Rush Recklessly','Choose a monster to gain 700 ATK:',opts.map(i=>({label:base(G.players[pIdx].mon[i]).n,card:G.players[pIdx].mon[i],action:()=>doIt(i)}))); else doIt(opts[0]); }
       toGYSelf(); break;
     }
     case 'jar_of_avarice': {
@@ -3891,14 +3905,14 @@ function resolveSpellTrapEffect(pIdx,card,idx){
       if(gyMons.length){
         if(G.isBot[pIdx]) doIt(gyMons.slice(0,5).map(c=>c.uid));
         else openMultiPickModal('Jar of Avarice','Choose up to 5 monsters from the Graveyard to shuffle into the Deck:',
-          gyMons.map(c=>({id:c.uid,label:base(c).n,em:base(c).em,tag:`Lv${base(c).l} ${base(c).atk}/${base(c).def}`})),5,doIt);
+          gyMons.map(c=>({id:c.uid,label:base(c).n,em:base(c).em,tag:`Lv${base(c).l} ${base(c).atk}/${base(c).def}`,card:c})),5,doIt);
       } else drawCard(pIdx);
       toGYSelf(); break;
     }
     case 'pot_of_duality': {
       const top=G.deck.slice(-3);
       const pick=(c)=>{ G.deck=G.deck.filter(x=>x.uid!==c.uid); G.players[pIdx].hand.push(c); shuffle(G.deck); render(); };
-      if(top.length){ if(pIdx===ME) askSeatChoice(pIdx,'Pot of Duality','Add 1 of the top 3 cards to your hand:',top.map(c=>({label:base(c).n,action:()=>pick(c)}))); else pick(top[0]); }
+      if(top.length){ if(pIdx===ME) askSeatChoice(pIdx,'Pot of Duality','Add 1 of the top 3 cards to your hand:',top.map(c=>({label:base(c).n,card:c,action:()=>pick(c)}))); else pick(top[0]); }
       toGYSelf(); break;
     }
     case 'trap_stun': G.trapStunTurn=true; log('Trap Stun negates Trap Cards until the End Phase.','sys'); toGYSelf(); break;
@@ -3922,7 +3936,7 @@ function resolveSpellTrapEffect(pIdx,card,idx){
         render();
         afterAnySummon(pIdx,c,z,false,true);
       };
-      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Call of the Haunted','Special Summon a monster from the Graveyard:',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[opts.length-1]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Call of the Haunted','Special Summon a monster from the Graveyard:',opts.map(c=>({label:base(c).n,card:c,action:()=>place(c)}))); else place(opts[opts.length-1]); }
       /* continuous: stays face-up on the field, not sent to GY */
       break;
     }
@@ -3935,7 +3949,7 @@ function resolveSpellTrapEffect(pIdx,card,idx){
         log(`${base(card).n} equips to ${base(m).n}.`, pIdx===ME?'me':'opp');
         render();
       };
-      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,base(card).n,'Equip to which of your monsters?',opts.map(i=>({label:base(G.players[pIdx].mon[i]).n,action:()=>doIt(i)}))); else doIt(opts[0]); }
+      if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,base(card).n,'Equip to which of your monsters?',opts.map(i=>({label:base(G.players[pIdx].mon[i]).n,card:G.players[pIdx].mon[i],action:()=>doIt(i)}))); else doIt(opts[0]); }
       else { toast('No monster to equip.'); toGYSelf(); }
       /* stays on field face-up as an Equip Spell; not sent to GY here */
       break;
