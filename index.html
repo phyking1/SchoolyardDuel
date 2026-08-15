@@ -1023,6 +1023,14 @@ function activateMonsterEffectFor(pIdx,idx){
     if(eff) eff.activate();
   });
 }
+function activateStEffectFor(pIdx,idx){
+  actingAsSeat(pIdx,()=>{
+    const card=G.players[pIdx].st[idx];
+    if(!card) return;
+    const eff=getActivatableStEffect(card,pIdx);
+    if(eff) eff.activate();
+  });
+}
 function activateSetSpellTrapFor(pIdx,idx){
   actingAsSeat(pIdx,()=>{
     const card=G.players[pIdx].st[idx];
@@ -1061,6 +1069,7 @@ const ONLINE_ACTION_FNS={
   flipSummonFor:(pIdx,idx)=>flipSummonFor(pIdx,idx),
   changePositionFor:(pIdx,idx)=>changePositionFor(pIdx,idx),
   activateMonsterEffectFor:(pIdx,idx)=>activateMonsterEffectFor(pIdx,idx),
+  activateStEffectFor:(pIdx,idx)=>activateStEffectFor(pIdx,idx),
   activateSetSpellTrapFor:(pIdx,idx)=>activateSetSpellTrapFor(pIdx,idx),
 };
 function dispatchAction(fnName,...args){
@@ -1157,7 +1166,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v80';
+const GAME_VERSION='v81';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1247,7 +1256,7 @@ S("Amulet of Ambition","Equip","amulet_of_ambition","The equipped monster gains 
 S("Mystical Space Typhoon","Quick","destroy_1_spelltrap","Target 1 Spell/Trap on the field; destroy it.","🌪️"),
 S("Cosmic Cyclone","Quick","cosmic_cyclone","Pay 1000 Health; target 1 Spell/Trap on the field; banish it.","🌌"),
 S("Raigeki","Normal","raigeki","Destroy all monsters your opponent controls.","⚡"),
-T("Waboku","Normal","waboku","This turn, you take no Battle Damage, and your opponent's monsters cannot be destroyed by battle.","🛡️"),
+T("Waboku","Normal","waboku","This turn, you take no Battle Damage, and your monsters cannot be destroyed by battle.","🛡️"),
 S("Harpie's Feather Duster","Normal","feather_duster","Destroy all Spell/Trap Cards your opponent controls.","🪶"),
 S("White Elephant's Gift","Normal","white_elephants_gift","Each player picks 1 monster they control; swap control of them. Each swapped monster gains 300 ATK/DEF for its new controller.","🐘"),
 S("Axe of Fools","Equip","axe_of_fools","The equipped monster gains 1000 ATK. If it is destroyed, its controller discards 1 random card from their hand.","🪓"),
@@ -1824,7 +1833,7 @@ function doStandbyPhase(){
     // connected human (seat 1-3 online) was never offered its choice at all. askSeatChoice(s,...)
     // itself handles local (s===0) vs remote (relayed) correctly; bots still don't get prompted,
     // same as before.
-    if(be && !G.players[s].isBot && G.deck.length){
+    if(be && !G.isBot[s] && G.deck.length){
       askSeatChoice(s,'Big Eye','Look at the top card of the Deck?',[
         {label:'View', action:()=>showCardPopup(previewInstance(base(G.deck[G.deck.length-1])),false)},
         {label:'Skip', action:()=>{}},
@@ -1857,29 +1866,44 @@ function rollDice(cb){
     const delta = bd==='BUFF' ? v : -v;
     G.attrMod = {a,delta};
     const who = G.active===ME?'Your':"Bot's";
-    resultEl.textContent = `${who} roll: ${a} monsters ${delta>=0?'+':''}${delta} ATK this turn!`;
+    resultEl.textContent = `${who} roll: ${a} monsters ${delta>=0?'+':''}${delta} ATK until the next Standby Phase!`;
     log(`Dice: ${a} / ${bd} / ${v} — all ${a} monsters on the field ${delta>=0?'gain':'lose'} ${v} ATK until the next Standby Phase.`, 'sys');
     render();
     setTimeout(()=>overlay.classList.remove('show'),900);
     if(cb) cb();
   },1000);
 }
-function effAtk(card){
+// ATK and DEF share every modifier except how tempAtk/tempDef are seeded, so they're computed
+// together and swapped as a pair for Reverse Glasses -- swapping only one of two independently
+// computed values (each already reading the other stat's temp/equip bonuses by mistake) would be
+// wrong the moment any other modifier is active at the same time.
+function effStats(card){
   const b=base(card);
   let atk=b.atk + (card.tempAtk||0);
-  card.equips.forEach(eq=>{ if(eq==='amulet_of_ambition'||eq==='horn_of_unicorn') atk+=700; if(eq==='axe_of_fools') atk+=1000; });
+  let def=b.def + (card.tempDef||0);
+  card.equips.forEach(eq=>{
+    if(eq==='amulet_of_ambition'||eq==='horn_of_unicorn'){ atk+=700; def+=700; }
+    if(eq==='axe_of_fools') atk+=1000;
+  });
   if(b.fx==='united_resistance') atk+=300*G.gy.filter(c=>isMonster(c)&&base(c).typ==='Warrior').length;
-  if(G.attrMod && b.a===G.attrMod.a) atk+=G.attrMod.delta;
+  if(G.attrMod && b.a===G.attrMod.a){ atk+=G.attrMod.delta; def+=G.attrMod.delta; }
+  if(card.reverseGlasses){ const t=atk; atk=def; def=t; }
   if(atk<0) atk=0;
+  if(def<0) def=0;
+  return {atk,def};
+}
+// isAttacking: Amulet of Ambition's real text halves the equipped monster's ATK "during damage
+// calculation" when IT attacks -- not its face-up displayed ATK, and not when it's merely
+// defending. Callers computing the attacker's own ATK for a battle it's declaring (comparison,
+// direct-attack damage, or a reflect/gain effect keyed off that same number) pass true; every
+// other read (card rendering, being attacked, hand/board display) leaves it false.
+function effAtk(card,isAttacking){
+  let atk=effStats(card).atk;
+  if(isAttacking && card.equips.includes('amulet_of_ambition')) atk=Math.floor(atk/2);
   return atk;
 }
 function effDef(card){
-  const b=base(card);
-  let def=b.def;
-  card.equips.forEach(eq=>{ if(eq==='amulet_of_ambition'||eq==='horn_of_unicorn') def+=700; });
-  if(G.attrMod && b.a===G.attrMod.a) def+=G.attrMod.delta;
-  if(def<0) def=0;
-  return def;
+  return effStats(card).def;
 }
 
 function doMainPhase(){
@@ -1893,9 +1917,11 @@ function doBattlePhase(){
   if(G.active!==ME && !onlineMode) botBattlePhase();
 }
 function doEndPhase(){
-  G.attrMod=null; // dice effect expires (a fresh one rolls next standby)
-  const p=G.players[G.active];
-  Object.values(p.mon).forEach(m=>{if(m) m.tempAtk=0;});
+  // G.attrMod (the Standby Phase dice buff/debuff) is deliberately NOT cleared here -- its own log
+  // text and the start-screen tagline both say "until the next Standby Phase", meaning it should
+  // persist through this End Phase and every other living player's turn, only replaced when
+  // rollDice() fires again at whoever's next Standby Phase comes up.
+  livingSeats().forEach(s=>{ G.players[s].mon.forEach(m=>{ if(m){ m.tempAtk=0; m.tempDef=0; } }); });
   render();
   setTimeout(endTurn, G.active!==ME?500:300);
 }
@@ -1991,14 +2017,31 @@ function sendToGY(pIdx,card,fromZoneType,zoneIdx,reason,destroyerSide){
   else if(fromZoneType==='st') p.st[zoneIdx]=null;
   else if(fromZoneType==='hand') p.hand=p.hand.filter(c=>c.uid!==card.uid);
   if(fromZoneType==='mon' && isMonster(card)){
-    if(card.blastChained) dealDamage(pIdx,500);
+    if(card.blastChained){
+      // Blast with Chain's real text: "It cannot leave the field except by destruction" -- battle
+      // and effect destruction are exactly what it allows to happen normally, so only a non-
+      // destruction departure (e.g. Tribute) triggers the 500 damage. banish() has its own separate
+      // redirect for the "leaves by banishing" case, which routes back through here with
+      // reason==='effect' so it isn't double-counted below.
+      if(reason!=='battle' && reason!=='effect') dealDamage(pIdx,500);
+      destroyLinkedBlastChainTrap(card.blastChained);
+    }
+    // Axe of Fools: "If it is destroyed, its controller discards 1 random card from their hand" --
+    // checked here (before card.equips is cleared below) and gated on actual destruction, same
+    // reason set Wattlemur's own destruction check below uses.
+    if(card.equips.includes('axe_of_fools') && (reason==='battle'||reason==='effect') && p.hand.length){
+      const disc=p.hand[Math.floor(Math.random()*p.hand.length)];
+      p.hand=p.hand.filter(c=>c.uid!==disc.uid);
+      G.gy.push(disc);
+      log(`Axe of Fools: ${pIdx===ME?'you discard':pName(pIdx)+' discards'} ${base(disc).n}.`, pIdx===ME?'me':'opp');
+    }
     p.st.forEach((c,i)=>{ if(c && !c.faceDown && c.equippedSide===pIdx && c.equippedIdx===zoneIdx){ G.gy.push(c); p.st[i]=null; } });
   }
   card.equips=[];
   const banished=fromZoneType==='mon' && card.banishOnLeave;
   if(banished){ log(`${base(card).n} is banished instead of going to the Graveyard.`,'sys'); }
   else G.gy.push(card);
-  if(fromZoneType==='st') destroyLinkedContinuous(card.uid);
+  if(fromZoneType==='st'){ destroyLinkedContinuous(card.uid); clearBlastChainLink(card.uid); }
   if(reason==='battle' && isMonster(card)) triggerOnDestroyedByBattle(pIdx,card,destroyerSide);
   if(!banished && isMonster(card)) triggerOnSentToGY(pIdx,card);
   if(!banished && isMonster(card) && base(card).fx==='wattlemur' && (reason==='battle'||reason==='effect')){
@@ -2019,11 +2062,36 @@ function destroyLinkedContinuous(trapUid){
     });
   });
 }
+// Bidirectional link for Blast with Chain: the target monster stores the Trap's uid in
+// blastChained, the Trap itself doesn't need a back-reference to search with since these two
+// helpers each scan for the other side directly by uid (matching linkedContinuous's own pattern
+// above, just in the opposite direction -- here it's the MONSTER leaving that should clean up the
+// TRAP, not the other way around).
+function destroyLinkedBlastChainTrap(trapUid){
+  livingSeats().forEach(s=>{
+    G.players[s].st.forEach((c,i)=>{ if(c && c.uid===trapUid){ G.gy.push(c); G.players[s].st[i]=null; } });
+  });
+}
+function clearBlastChainLink(trapUid){
+  livingSeats().forEach(s=>{
+    G.players[s].mon.forEach(m=>{ if(m && m.blastChained===trapUid) delete m.blastChained; });
+  });
+}
 function banish(pIdx,card,fromZoneType,zoneIdx){
+  if(fromZoneType==='mon' && isMonster(card) && card.blastChained){
+    // "It cannot leave the field except by destruction" -- redirect this banish into the Trap's own
+    // destroy-instead-and-inflict-500-damage replacement rather than letting the monster leave
+    // untouched. Route through sendToGY (reason 'effect') so it also does the normal destruction
+    // cleanup (equip removal, GY placement); its own blastChained branch won't double the damage
+    // since 'effect' is excluded there -- the 500 is dealt exactly once, here.
+    dealDamage(pIdx,500);
+    sendToGY(pIdx,card,'mon',zoneIdx,'effect');
+    return;
+  }
   if(fromZoneType==='mon'||fromZoneType==='st') playDestroyClone(pIdx,fromZoneType,zoneIdx);
   const p=G.players[pIdx];
   if(fromZoneType==='mon') p.mon[zoneIdx]=null;
-  else if(fromZoneType==='st'){ p.st[zoneIdx]=null; destroyLinkedContinuous(card.uid); }
+  else if(fromZoneType==='st'){ p.st[zoneIdx]=null; destroyLinkedContinuous(card.uid); clearBlastChainLink(card.uid); }
   if(fromZoneType==='mon' && isMonster(card)){
     p.st.forEach((c,i)=>{ if(c && !c.faceDown && c.equippedSide===pIdx && c.equippedIdx===zoneIdx){ G.gy.push(c); p.st[i]=null; } });
   }
@@ -2642,6 +2710,18 @@ function onZoneCardClick(pIdx,type,idx){
     showModal(base(card).n,'Choose an action:',opts);
     return;
   }
+  // click a face-up Continuous Spell/Trap you control with a manual once-per-turn effect
+  if(!G.selection && (G.phase==='main1'||G.phase==='main2') && G.active===ME && pIdx===ME && type==='st'){
+    const faceUpCard=G.players[ME].st[idx];
+    if(faceUpCard && !faceUpCard.faceDown){
+      const eff=getActivatableStEffect(faceUpCard,ME);
+      if(eff) showModal(base(faceUpCard).n,'Choose an action:',[
+        {label:eff.label,action:()=>dispatchAction('activateStEffectFor',ME,idx)},
+        {label:'Cancel',action:()=>{}},
+      ]);
+      return;
+    }
+  }
   // activate a set spell/trap you control
   if(!G.selection && (G.phase==='main1'||G.phase==='main2') && G.active===ME && pIdx===ME && type==='st'){
     const card=G.players[ME].st[idx];
@@ -2693,7 +2773,7 @@ function placeSpell(card,idx,activate){
 function offerDarkBribeResponse(activatorSide,card,idx,onResolve){
   const others=livingSeats().filter(s=>s!==activatorSide);
   const findEligible=(seat)=>{
-    const eligible=[]; G.players[seat].st.forEach((c,i)=>{ if(c && c.faceDown && (base(c).fx==='dark_bribe'||base(c).fx==='solemn_judgment')) eligible.push({i,c,fx:base(c).fx}); });
+    const eligible=[]; if(G.trapStunTurn) return eligible; G.players[seat].st.forEach((c,i)=>{ if(c && c.faceDown && (base(c).fx==='dark_bribe'||base(c).fx==='solemn_judgment')) eligible.push({i,c,fx:base(c).fx}); });
     return eligible;
   };
   const activateResponse=(opp,trapIdx,trapCard,fx)=>{
@@ -2808,7 +2888,7 @@ function openSummonTrapWindow(summonerIdx,card,idx,isSpecial){
   const findEligible=(seat)=>{
     const eligible=[];
     G.players[seat].st.forEach((c,i)=>{
-      if(c && c.faceDown){
+      if(c && c.faceDown && !G.trapStunTurn){
         const fx=base(c).fx;
         if(fx==='trap_hole' && !isSpecial && effAtk(card)>=1500) eligible.push({i,c,fx});
         else if(fx==='torrential_tribute') eligible.push({i,c,fx});
@@ -2967,6 +3047,30 @@ function getActivatableMonsterEffect(card,pIdx,zoneIdx){
   }
   return null;
 }
+// Same shape as getActivatableMonsterEffect but for a face-up Continuous Spell/Trap sitting in the
+// S/T zone. Enchanting Fitting Room's real text is "each player" can use it once per turn, but this
+// codebase has no UI for activating a continuous card that isn't on your own board -- scoped here
+// to its controller, once per their own turn, which is the achievable slice of the real card given
+// that constraint (previously this card did nothing at all once placed).
+function getActivatableStEffect(card,pIdx){
+  const b=base(card);
+  const usedThisTurn=card.usedEffectTurn===G.turnNum;
+  if(b.fx==='enchanting_fitting_room'){
+    if(usedThisTurn || !G.players[pIdx].hand.length) return null;
+    return {label:'Discard 1: Draw 1',activate:()=>{
+      card.usedEffectTurn=G.turnNum;
+      const doIt=(disc)=>{
+        sendToGY(pIdx,disc,'hand',-1,'effect');
+        drawCard(pIdx);
+        log(`${pIdx===ME?'You':'Bot'} discards a card to draw with ${b.n}.`,pIdx===ME?'me':'opp');
+        render();
+      };
+      if(pIdx===ME) askSeatChoice(pIdx,b.n,'Discard which card?',G.players[pIdx].hand.map(c=>({label:base(c).n,card:c,action:()=>doIt(c)})));
+      else doIt(G.players[pIdx].hand[0]);
+    }};
+  }
+  return null;
+}
 function triggerFlip(pIdx,card,idx,onDone){
   // performBattle's subsequent damage/destruction math must not run until whichever branch below
   // actually finishes -- for hane_hane/old_vindictive_magician that can be an async modal choice
@@ -2987,14 +3091,14 @@ function triggerFlip(pIdx,card,idx,onDone){
       // performBattle may be resolving on behalf of a remote seat (see resolveAttackFor's
       // actingAsSeat, which has already closed and reverted ME by the time a flipped monster's own
       // async choice would fire). Same pattern as Phase 1's chooseOpponent fix.
-      if(!G.players[pIdx].isBot){ askSeatChoice(pIdx,'Hane-Hane',"Return which monster to its owner's hand?", opts.map(o=>({label:base(G.players[o.side].mon[o.i]).n+(o.side===pIdx?' (yours)':` (${pName(o.side)}'s)`), action:()=>returnOne(o)}))); }
+      if(!G.isBot[pIdx]){ askSeatChoice(pIdx,'Hane-Hane',"Return which monster to its owner's hand?", opts.map(o=>({label:base(G.players[o.side].mon[o.i]).n+(o.side===pIdx?' (yours)':` (${pName(o.side)}'s)`), action:()=>returnOne(o)}))); }
       else returnOne(opts[Math.floor(Math.random()*opts.length)]);
     } else done();
   }
   else if(fx==='magician_of_faith'){
     const spells=G.gy.filter(c=>base(c).cat==='Spell');
     if(spells.length){
-      if(!G.players[pIdx].isBot) askSeatChoice(pIdx,'Magician of Faith','Add a Spell from the Graveyard to your hand?', spells.map(c=>({label:base(c).n,action:()=>{ G.gy=G.gy.filter(x=>x.uid!==c.uid); G.players[pIdx].hand.push(c); render(); done(); }})));
+      if(!G.isBot[pIdx]) askSeatChoice(pIdx,'Magician of Faith','Add a Spell from the Graveyard to your hand?', spells.map(c=>({label:base(c).n,action:()=>{ G.gy=G.gy.filter(x=>x.uid!==c.uid); G.players[pIdx].hand.push(c); render(); done(); }})));
       else { const c=spells[0]; G.gy=G.gy.filter(x=>x.uid!==c.uid); G.players[pIdx].hand.push(c); render(); done(); }
     } else done();
   }
@@ -3004,7 +3108,7 @@ function triggerFlip(pIdx,card,idx,onDone){
     if(eligibleOpponents.length){
       const doIt=(opp,i)=>{ log(`Old Vindictive Magician destroys ${base(G.players[opp].mon[i]).n}.`,pIdx===ME?'me':'opp'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect',pIdx); render(); done(); };
       const lowTargets=(opp)=>{ const arr=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && effAtk(m)<=1500 && !m.unaffectedByEffects) arr.push(i); }); return arr; };
-      if(!G.players[pIdx].isBot){
+      if(!G.isBot[pIdx]){
         const chooseTarget=(opp)=>{
           askSeatChoice(pIdx,'Old Vindictive Magician','Destroy a monster with 1500 or less ATK?',
             lowTargets(opp).map(i=>({label:base(G.players[opp].mon[i]).n,action:()=>doIt(opp,i)})).concat([{label:'Skip',action:()=>done()}]));
@@ -3141,12 +3245,12 @@ function openAttackTrapWindow(attackerSide,defenderSide,attacker,atkIdx,targetId
   const defP=G.players[defenderSide];
   const eligible=[];
   defP.st.forEach((c,i)=>{
-    if(c && c.faceDown){
+    if(c && c.faceDown && !G.trapStunTurn){
       const fx=base(c).fx;
       if(['magic_cylinder','draining_shield','dimensional_prison','waboku'].includes(fx)) eligible.push({i,c,fx});
     }
   });
-  const mirage=defP.mon.find(m=>m && !m.faceDown && base(m).fx==='mirage_dragon');
+  const mirage=defP.mon.find(m=>m && !m.faceDown && base(m).fx==='mirage_dragon' && m.usedEffectTurn!==G.turnNum);
   const kuriboh=!G.noBattleDamage[defenderSide] ? defP.hand.find(c=>base(c).fx==='kuriboh') : null;
   const useKuriboh=()=>{
     sendToGY(defenderSide,kuriboh,'hand',-1,'effect');
@@ -3157,7 +3261,7 @@ function openAttackTrapWindow(attackerSide,defenderSide,attacker,atkIdx,targetId
   };
   const buildRealOpts=()=>{
     const opts=eligible.map(e=>({label:base(e.c).n,card:e.c,action:()=>{ activateFromField(defenderSide,e.i); resolveTrapVsAttack(e.fx,attackerSide,defenderSide,attacker,atkIdx,targetIdx,cb,defenderSide,e.i); }}));
-    if(mirage) opts.push({label:'Negate with Mirage Dragon',card:mirage,action:()=>{ log('Mirage Dragon negates the attack!',defenderSide===ME?'me':'opp'); const mEl=zoneCardEl(defenderSide,'mon',defP.mon.indexOf(mirage)),aEl=zoneCardEl(attackerSide,'mon',atkIdx); if(mEl&&aEl) playBeam(mEl,aEl,'trap'); cb(true); }});
+    if(mirage) opts.push({label:'Negate with Mirage Dragon',card:mirage,action:()=>{ mirage.usedEffectTurn=G.turnNum; log('Mirage Dragon negates the attack!',defenderSide===ME?'me':'opp'); const mEl=zoneCardEl(defenderSide,'mon',defP.mon.indexOf(mirage)),aEl=zoneCardEl(attackerSide,'mon',atkIdx); if(mEl&&aEl) playBeam(mEl,aEl,'trap'); cb(true); }});
     if(kuriboh) opts.push({label:'Discard Kuriboh',card:kuriboh,action:useKuriboh});
     return opts;
   };
@@ -3169,17 +3273,17 @@ function openAttackTrapWindow(attackerSide,defenderSide,attacker,atkIdx,targetId
     const opts=buildRealOpts();
     if(opts.length===0){ cb(false); return; }
     opts.push({label:'Take the hit',action:()=>cb(false)});
-    askSeatChoice(defenderSide,'Incoming Attack!',`${base(attacker).n} (ATK ${effAtk(attacker)}) is attacking. Respond?`,opts);
+    askSeatChoice(defenderSide,'Incoming Attack!',`${base(attacker).n} (ATK ${effAtk(attacker,true)}) is attacking. Respond?`,opts);
     return;
   }
   if(defenderSide===ME){
     const opts=buildRealOpts();
     if(opts.length===0){ cb(false); return; }
     opts.push({label:'Take the hit',action:()=>cb(false)});
-    showModal('Incoming Attack!', `${base(attacker).n} (ATK ${effAtk(attacker)}) is attacking. Respond?`, opts);
+    showModal('Incoming Attack!', `${base(attacker).n} (ATK ${effAtk(attacker,true)}) is attacking. Respond?`, opts);
   } else {
     // bot defending
-    if(mirage && Math.random()<0.6){ log("Bot's Mirage Dragon negates the attack!",'opp'); const mEl=zoneCardEl(defenderSide,'mon',defP.mon.indexOf(mirage)),aEl=zoneCardEl(attackerSide,'mon',atkIdx); if(mEl&&aEl) playBeam(mEl,aEl,'trap'); cb(true); return; }
+    if(mirage && Math.random()<0.6){ mirage.usedEffectTurn=G.turnNum; log("Bot's Mirage Dragon negates the attack!",'opp'); const mEl=zoneCardEl(defenderSide,'mon',defP.mon.indexOf(mirage)),aEl=zoneCardEl(attackerSide,'mon',atkIdx); if(mEl&&aEl) playBeam(mEl,aEl,'trap'); cb(true); return; }
     if(eligible.length){
       const pick=eligible[Math.floor(Math.random()*eligible.length)];
       activateFromField(defenderSide,pick.i);
@@ -3194,8 +3298,8 @@ function resolveTrapVsAttack(fx,attackerSide,defenderSide,attacker,atkIdx,target
   const trapCard = trapSide!==undefined ? G.players[trapSide].st[trapIdx] : null;
   function trapToGY(){ if(trapCard){ sendToGY(trapSide,trapCard,'st',trapIdx,'effect'); render(); } }
   if(trapEl && atkEl && ['magic_cylinder','draining_shield','dimensional_prison'].includes(fx)) playBeam(trapEl,atkEl,'trap');
-  if(fx==='magic_cylinder'){ dealDamage(attackerSide,effAtk(attacker)); log(`Magic Cylinder reflects ${effAtk(attacker)} damage!`, defenderSide===ME?'me':'opp'); trapToGY(); cb(true); }
-  else if(fx==='draining_shield'){ gainHealth(defenderSide,effAtk(attacker)); log(`Draining Shield gains ${effAtk(attacker)} Health!`, defenderSide===ME?'me':'opp'); trapToGY(); cb(true); }
+  if(fx==='magic_cylinder'){ dealDamage(attackerSide,effAtk(attacker,true)); log(`Magic Cylinder reflects ${effAtk(attacker,true)} damage!`, defenderSide===ME?'me':'opp'); trapToGY(); cb(true); }
+  else if(fx==='draining_shield'){ gainHealth(defenderSide,effAtk(attacker,true)); log(`Draining Shield gains ${effAtk(attacker,true)} Health!`, defenderSide===ME?'me':'opp'); trapToGY(); cb(true); }
   else if(fx==='dimensional_prison'){ banish(attackerSide,attacker,'mon',atkIdx); log(`Dimensional Prison banishes ${base(attacker).n}!`, defenderSide===ME?'me':'opp'); trapToGY(); cb(true); }
   else if(fx==='waboku'){ G.waboku=defenderSide; log(`Waboku will prevent battle damage and destruction this turn.`, defenderSide===ME?'me':'opp'); trapToGY(); cb(false); }
   else cb(false);
@@ -3213,8 +3317,8 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
   if(targetIdx===-1){
     const blocked=G.waboku===defenderSide||G.noBattleDamage[defenderSide];
     if(G.waboku===defenderSide){ log('Waboku prevents the Battle Damage.', defenderSide===ME?'me':'opp'); }
-    else dealDamage(defenderSide, effAtk(attacker), true);
-    log(`Direct attack deals ${blocked?0:effAtk(attacker)} damage!`, attackerSide===ME?'me':'opp');
+    else dealDamage(defenderSide, effAtk(attacker,true), true);
+    log(`Direct attack deals ${blocked?0:effAtk(attacker,true)} damage!`, attackerSide===ME?'me':'opp');
     render(); return;
   }
   const defender=G.players[defenderSide].mon[targetIdx];
@@ -3226,16 +3330,16 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
     // field while we were waiting on its choice -- re-check both monsters are still exactly where
     // this battle expects them before computing damage/destruction against stale references.
     if(G.players[defenderSide].mon[targetIdx]!==defender || G.players[attackerSide].mon[atkIdx]!==attacker){ render(); return; }
-    const aAtk=effAtk(attacker);
+    const aAtk=effAtk(attacker,true);
     if(defender.pos==='atk'){
       const dAtk=effAtk(defender);
       if(aAtk>dAtk){
         const dmg=aAtk-dAtk;
         const blocked=G.waboku===defenderSide||G.noBattleDamage[defenderSide];
-        protectedDestroy(defenderSide,defender,targetIdx,attackerSide);
+        const destroyed=protectedDestroy(defenderSide,defender,targetIdx,attackerSide);
         if(G.waboku!==defenderSide) dealDamage(defenderSide,dmg,true);
         log(`${base(attacker).n} destroys ${base(defender).n}! ${blocked?0:dmg} damage.`,attackerSide===ME?'me':'opp');
-        grantExtraAttackIfEligible(attacker);
+        if(destroyed) grantExtraAttackIfEligible(attacker);
       } else if(aAtk<dAtk){
         const dmg=dAtk-aAtk;
         const blocked=G.noBattleDamage[attackerSide];
@@ -3250,9 +3354,9 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
     } else {
       const dDef=effDef(defender);
       if(aAtk>dDef){
-        protectedDestroy(defenderSide,defender,targetIdx,attackerSide);
+        const destroyed=protectedDestroy(defenderSide,defender,targetIdx,attackerSide);
         log(`${base(attacker).n} destroys ${base(defender).n} (Defense Position). No Battle Damage.`,attackerSide===ME?'me':'opp');
-        grantExtraAttackIfEligible(attacker);
+        if(destroyed) grantExtraAttackIfEligible(attacker);
       } else if(aAtk<dDef){
         const dmg=dDef-aAtk;
         const blocked=G.noBattleDamage[attackerSide];
@@ -3272,8 +3376,9 @@ function performBattle(attackerSide,defenderSide,atkIdx,targetIdx){
   } else continueBattle();
 }
 function protectedDestroy(side,card,idx,destroyerSide){
-  if(G.waboku===side){ log(`Waboku protects ${base(card).n} from destruction.`, side===ME?'me':'opp'); return; }
+  if(G.waboku===side){ log(`Waboku protects ${base(card).n} from destruction.`, side===ME?'me':'opp'); return false; }
   sendToGY(side,card,'mon',idx,'battle',destroyerSide);
+  return true;
 }
 
 /* ============================= SPELL/TRAP EFFECT RESOLUTION ============================= */
@@ -3295,7 +3400,7 @@ function chooseOpponent(pIdx,eligible,cb){
   // runs, silently misrouting a real remote human into the bot heuristic below. askSeatChoice(pIdx,
   // ...) itself already correctly handles "local human" (pIdx===0) vs "remote human" (any other
   // seat, relayed over the network) -- isBot is the only question actually being asked here.
-  if(G.players[pIdx].isBot){
+  if(G.isBot[pIdx]){
     let best=eligible[0];
     eligible.forEach(s=>{ if(G.health[s]<G.health[best]) best=s; }); // simple heuristic: pick on the weakest
     cb(best);
@@ -3319,7 +3424,7 @@ function chooseOpponentThenTarget(pIdx,candidateOpponents,getTargets,cb){
     // exactly the async gap that bug depends on: it only runs once chooseOpponent's own callback
     // fires, which for a remote human happens after a real network round-trip, by which point
     // actingAsSeat has long since restored ME to the host's own seat.
-    if(G.players[pIdx].isBot){
+    if(G.isBot[pIdx]){
       const pick=targets[Math.floor(Math.random()*targets.length)];
       cb(opp,pick.idx);
     } else {
@@ -3347,7 +3452,7 @@ function resolveEachPlayerPassLeft(pIdx,card,idx,bonusAtk){
     // isBot, not giver===ME -- see chooseOpponent's comment for why. This loop chains through
     // multiple givers' async choices one after another; by the second or later giver, ME may
     // already have reverted from an earlier giver's own actingAsSeat window closing.
-    if(G.players[giver].isBot){
+    if(G.isBot[giver]){
       finish(opts[Math.floor(Math.random()*opts.length)]);
     } else {
       askSeatChoice(giver,base(card).n,`Choose a monster to give to ${pName(nextAliveSeat(giver))} (the player to your left):`,
@@ -3361,7 +3466,7 @@ function resolveEachPlayerPassLeft(pIdx,card,idx,bonusAtk){
       const z=findEmptyZone(mv.to,'mon');
       if(z<0){ G.gy.push(mv.card); log(`${pName(mv.to)} has no empty zone -- ${base(mv.card).n} is sent to the Graveyard instead.`,'sys'); return; }
       mv.card.controller=mv.to; mv.card.zone=z;
-      if(bonusAtk) mv.card.tempAtk=(mv.card.tempAtk||0)+bonusAtk;
+      if(bonusAtk){ mv.card.tempAtk=(mv.card.tempAtk||0)+bonusAtk; mv.card.tempDef=(mv.card.tempDef||0)+bonusAtk; }
       G.players[mv.to].mon[z]=mv.card;
     });
     log(`${base(card).n}: each player passes a monster to their left.`,'sys');
@@ -3454,9 +3559,16 @@ function resolveSpellTrapEffect(pIdx,card,idx){
       toGYSelf(); break;
     }
     case 'premature_burial': {
-      if(G.health[pIdx]<=800){ toast('Not enough Health.'); G.players[pIdx].st[idx]=null; break; }
+      // Failing the Health cost means the activation simply never happened -- the card returns to
+      // hand rather than vanishing from the S/T zone slot it was never actually placed to keep.
+      if(G.health[pIdx]<=800){ toast('Not enough Health.'); G.players[pIdx].hand.push(card); G.players[pIdx].st[idx]=null; render(); break; }
       const opts=G.gy.filter(c=>isMonster(c));
-      const place=(c)=>{ const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.'); return;} G.health[pIdx]-=800; G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.equips=['premature_burial']; G.players[pIdx].mon[z]=c; card.faceDown=false; G.players[pIdx].st[idx]=card; render(); log(`${pIdx===ME?'You':'Bot'} pays 800 Health to Special Summon ${base(c).n}.`,pIdx===ME?'me':'opp'); afterAnySummon(pIdx,c,z,false,true); };
+      const place=(c)=>{
+        const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty Monster Zone.'); return;}
+        G.health[pIdx]-=800; G.gy=G.gy.filter(x=>x.uid!==c.uid); c.faceDown=false; c.pos='atk'; c.controller=pIdx; c.zone=z; c.summonedTurn=G.turnNum; c.attacked=false; c.equips=['premature_burial']; G.players[pIdx].mon[z]=c;
+        card.faceDown=false; card.equippedSide=pIdx; card.equippedIdx=z; G.players[pIdx].st[idx]=card;
+        render(); log(`${pIdx===ME?'You':'Bot'} pays 800 Health to Special Summon ${base(c).n}.`,pIdx===ME?'me':'opp'); afterAnySummon(pIdx,c,z,false,true);
+      };
       if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Premature Burial','Choose a monster to Special Summon (pay 800 Health):',opts.map(c=>({label:base(c).n,action:()=>place(c)}))); else place(opts[0]); return; }
       toGYSelf(); break;
     }
@@ -3476,7 +3588,8 @@ function resolveSpellTrapEffect(pIdx,card,idx){
       toGYSelf(); break;
     }
     case 'cosmic_cyclone': {
-      if(G.health[pIdx]<=1000){ toast('Not enough Health.'); G.players[pIdx].st[idx]=null; break; }
+      // Same "activation simply doesn't happen" rule as Premature Burial's failed cost above.
+      if(G.health[pIdx]<=1000){ toast('Not enough Health.'); G.players[pIdx].hand.push(card); G.players[pIdx].st[idx]=null; render(); break; }
       const opts=[]; livingSeats().forEach(s=>{ G.players[s].st.forEach((c,i)=>{ if(c && c.uid!==card.uid) opts.push({s,i,c}); }); });
       const doIt=(o)=>{ G.health[pIdx]-=1000; banish(o.s,o.c,'st',o.i); log(`${base(card).n} banishes a Spell/Trap.`,pIdx===ME?'me':'opp'); render(); };
       if(opts.length){ if(pIdx===ME) askSeatChoice(pIdx,'Cosmic Cyclone','Choose a Spell/Trap to banish (pay 1000 Health):',opts.map(o=>({label:(o.s===ME?'Your ':pName(o.s)+"'s ")+(o.c.faceDown?'Set Card':base(o.c).n),action:()=>doIt(o)}))); else doIt(opts[Math.floor(Math.random()*opts.length)]); }
@@ -3533,7 +3646,7 @@ function resolveSpellTrapEffect(pIdx,card,idx){
       if(top.length){ if(pIdx===ME) askSeatChoice(pIdx,'Pot of Duality','Add 1 of the top 3 cards to your hand:',top.map(c=>({label:base(c).n,action:()=>pick(c)}))); else pick(top[0]); }
       toGYSelf(); break;
     }
-    case 'trap_stun': G.trapStunTurn=G.turnNum+'_'+G.active; log('Trap Stun negates all face-up Trap effects this turn.','sys'); toGYSelf(); break;
+    case 'trap_stun': G.trapStunTurn=true; log('Trap Stun negates Trap Cards until the End Phase.','sys'); toGYSelf(); break;
     case 'time_seal': {
       const eligible=livingSeats().filter(s=>s!==pIdx);
       chooseOpponent(pIdx,eligible,(opp)=>{
@@ -3578,8 +3691,8 @@ function resolveSpellTrapEffect(pIdx,card,idx){
       const getTargets=(opp)=>allOwnedMonsters(opp).map(i=>({idx:i,label:base(G.players[opp].mon[i]).n}));
       chooseOpponentThenTarget(pIdx,eligibleOpponents,getTargets,(opp,i)=>{
         if(opp==null) return;
-        G.players[opp].mon[i].blastChained=true;
-        log(`Blast with Chain is equipped to ${base(G.players[opp].mon[i]).n}. If it's destroyed, its controller takes 500 damage.`,pIdx===ME?'me':'opp');
+        G.players[opp].mon[i].blastChained=card.uid;
+        log(`Blast with Chain is equipped to ${base(G.players[opp].mon[i]).n}. It cannot leave the field except by destruction, or it will be destroyed and its controller takes 500 damage.`,pIdx===ME?'me':'opp');
         render();
       });
       /* continuous: stays face-up on the field, not sent to GY */
@@ -3864,6 +3977,11 @@ function botUseMonsterEffects(){
     const eff=getActivatableMonsterEffect(m,acting,i);
     if(eff) eff.activate();
   });
+  p.st.forEach(c=>{
+    if(!c || c.faceDown) return;
+    const eff=getActivatableStEffect(c,acting);
+    if(eff) eff.activate();
+  });
   setTimeout(()=>botStep2(),700);
 }
 function botStep2(){
@@ -3964,6 +4082,7 @@ doEndPhase=function(){
     G.players[s].mon.forEach(m=>{ if(m){ if(m.reverseGlasses) m.reverseGlasses=false; if(m.unaffectedByEffects) m.unaffectedByEffects=false; if(m.tempEndPhaseReturn){ const t=m.tempEndPhaseReturn; const zi=G.players[s].mon.indexOf(m); G.players[s].mon[zi]=null; m.controller=t.owner; m.zone=t.ownIdx; if(!G.players[t.owner].mon[t.ownIdx]) G.players[t.owner].mon[t.ownIdx]=m; delete m.tempEndPhaseReturn; } } });
   }
   G.waboku=null;
+  G.trapStunTurn=false;
   G.noBattleDamage=Array(G.numPlayers).fill(false);
   if(G.skipDraw!==undefined && G.skipDraw!==null){ /* handled in doDrawPhase via consumption below */ }
   origDoEndPhase();
