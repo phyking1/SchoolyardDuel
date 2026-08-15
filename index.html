@@ -803,7 +803,18 @@ function applyFrameScale(){
     // any viewport height), just with this bigger cap -- genuinely wider on any window tall enough
     // to make use of it, identical to today on a shorter one, but never at risk of overflowing.
     currentFrameScale=1;
-    const isFourPGrid = typeof G!=='undefined' && G && G.numPlayers===4;
+    // G is declared with `let` much further down the file, and this function's very first call
+    // happens unconditionally near the top of the script (long before that point runs) -- typeof
+    // does NOT protect against referencing a let/const before its own declaration line executes
+    // (the temporal dead zone), it throws exactly the same as a bare reference would. Concretely:
+    // once Desktop Mode has ever been turned on, its persisted localStorage value makes THIS branch
+    // run on every single page load from the very first call, including the one at the very bottom
+    // of Exit Game's location.reload() -- an uncaught ReferenceError here aborts before the .ready
+    // class ever gets added, leaving #game-frame permanently visibility:hidden (a black screen).
+    // The try/catch is the actual fix; the pre-game-start default (not-four-player-grid, i.e. the
+    // safe aspect-tied formula) is exactly correct regardless of which branch is taken.
+    let isFourPGrid=false;
+    try{ isFourPGrid = G && G.numPlayers===4; }catch(e){}
     let w, h;
     if(isFourPGrid){
       w=Math.min(vw, DESKTOP_MODE_MAX_W);
@@ -1101,7 +1112,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v75';
+const GAME_VERSION='v76';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
