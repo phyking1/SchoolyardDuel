@@ -135,12 +135,6 @@ button{font-family:inherit;cursor:pointer;}
 .zone-row{display:flex;justify-content:center;gap:clamp(4px,1.6cqw,8px);flex:0 0 auto;padding:2px 0;}
 .zone{width:clamp(38px,13cqw,64px);height:clamp(61px,20cqw,98px);border-radius:6px;position:relative;
   display:flex;align-items:center;justify-content:center;transition:box-shadow .15s;flex-shrink:0;}
-/* Desktop Mode: raises the MAX end of every card/zone clamp() below so the extra cq room a wider
-   frame provides (see DESKTOP_MODE_MAX_W/_H in applyFrameScale()) actually gets used by bigger
-   content, instead of cards capping out early and just leaving empty space around them. Kept
-   deliberately modest (not proportional to the full width/height increase) -- 2-3P's content is a
-   single stacked column with real vertical headroom limits; see that branch's own comment. */
-body.desktop-wide .zone{width:clamp(38px,13cqw,74px);height:clamp(61px,20cqw,113px);}
 .zone.mon{background:var(--zone);border:2px dashed var(--zone-border);}
 .zone.mon[data-side="1"]{background:#2a1013;border-color:#8a2a35;}
 .zone.mon[data-side="0"]{background:#0d1a2a;border-color:#2a6bb0;}
@@ -155,8 +149,6 @@ body.desktop-wide .zone{width:clamp(38px,13cqw,74px);height:clamp(61px,20cqw,113
 .zone-row.compact .zone{width:clamp(24px,8cqw,40px);height:clamp(38px,12.6cqw,62px);}
 .hand-row.compact{min-height:clamp(28px,8cqw,44px);gap:clamp(2px,.8cqw,4px);}
 .hand-row.compact .card{width:clamp(22px,7.7cqw,37px);height:clamp(36px,12.4cqw,58px);}
-body.desktop-wide .zone-row.compact .zone{width:clamp(24px,8cqw,46px);height:clamp(38px,12.6cqw,71px);}
-body.desktop-wide .hand-row.compact .card{width:clamp(22px,7.7cqw,43px);height:clamp(36px,12.4cqw,67px);}
 
 /* stacked opponent panels: one per living seat other than the human, all visible simultaneously */
 #opp-stack{display:flex;flex-direction:column;gap:6px;padding:2px 0;}
@@ -185,8 +177,6 @@ body.desktop-wide .hand-row.compact .card{width:clamp(22px,7.7cqw,43px);height:c
 #board.two-player-mode .zone{width:clamp(51px,17.5cqw,86px);height:clamp(82px,27cqw,132px);}
 #board.two-player-mode .card{width:clamp(49px,16.7cqw,81px);height:clamp(78px,27cqw,127px);}
 #board.two-player-mode .zone-row{gap:clamp(5px,2.2cqw,11px);}
-body.desktop-wide #board.two-player-mode .zone{width:clamp(51px,17.5cqw,99px);height:clamp(82px,27cqw,152px);}
-body.desktop-wide #board.two-player-mode .card{width:clamp(49px,16.7cqw,93px);height:clamp(78px,27cqw,146px);}
 #board.two-player-mode .hand-row{gap:clamp(4px,1.6cqw,8px);}
 .opp-panel-header{display:flex;align-items:center;gap:6px;padding:0 2px;}
 .opp-panel-name{font-size:clamp(.55em,1.8cqw,.72em);font-weight:800;color:var(--gold);
@@ -248,8 +238,6 @@ body.desktop-wide #board.two-player-mode .card{width:clamp(49px,16.7cqw,93px);he
    unused whitespace around small cards. */
 .table-dual-top .zone-row.compact .zone{width:clamp(28px,10.3cqw,40px);height:clamp(44px,16.2cqw,63px);}
 .table-dual-top .hand-row.compact .card{width:clamp(27px,9.9cqw,38px);height:clamp(42px,15.9cqw,62px);}
-body.desktop-wide .table-dual-top .zone-row.compact .zone{width:clamp(28px,10.3cqw,46px);height:clamp(44px,16.2cqw,72px);}
-body.desktop-wide .table-dual-top .hand-row.compact .card{width:clamp(27px,9.9cqw,44px);height:clamp(42px,15.9cqw,71px);}
 
 .hand-row{display:flex;justify-content:center;gap:clamp(3px,1.2cqw,6px);flex:0 0 auto;padding:4px 0;
   min-height:clamp(66px,18.4cqw,106px);align-items:flex-end;flex-wrap:wrap;}
@@ -315,8 +303,6 @@ body.desktop-wide .table-dual-top .hand-row.compact .card{width:clamp(27px,9.9cq
 .card{width:clamp(36px,12.4cqw,60px);height:clamp(58px,20cqw,94px);border-radius:5px;
   position:relative;overflow:hidden;cursor:pointer;transition:transform .12s;flex-shrink:0;
   user-select:none;font-size:clamp(7px,2.2cqw,12px);}
-body.desktop-wide .card{width:clamp(36px,12.4cqw,69px);height:clamp(58px,20cqw,108px);
-  font-size:clamp(7px,2.2cqw,14px);}
 .card:hover{transform:translateY(-6px);z-index:5;}
 .card.selected{outline:3px solid var(--gold);outline-offset:1px;transform:translateY(-6px);}
 .card.big{width:110px;height:154px;font-size:12px;}
@@ -745,24 +731,27 @@ const FRAME_W=393, FRAME_H=852, FRAME_ASPECT=FRAME_W/FRAME_H;
 // toggle below gets its own, more generous treatment.
 const DESKTOP_MAX_W=520;
 // desktopMode's size caps -- see applyFrameScale()'s desktopMode branch for how these get used
-// differently for 4P (width/height independent, genuinely square-ish) vs 2-3P (aspect-tied to
-// FRAME_ASPECT like the auto-detected branch, just with this bigger width cap -- 2-3P's content has
-// no real slack to spend on becoming square without overflowing, measured directly).
-// body.desktop-wide's CSS (see .zone/.card rules) raises the max end of every clamp() so cards/
-// zones actually grow to use the extra room, rather than leaving dead space around still-capped
-// content. DESKTOP_MODE_MAX_H_SQUARE was confirmed to comfortably fit 4P's single-page layout
-// (well under 900px needed).
+// differently for 4P (width/height independent, genuinely square-ish -- a real, dramatic win: its
+// content is a comparatively short 2x2 grid, so it actually benefits from the frame's own real
+// pixel budget growing) vs 2-3P (aspect-tied to FRAME_ASPECT like the auto-detected branch, just
+// with this bigger width cap). 2-3P's content is a single stacked column whose height need already
+// tracks its width almost exactly at FRAME_ASPECT with no slack (measured directly) -- meaning on
+// any realistic monitor height this cap barely ever binds, and 2-3P Desktop Mode ends up visually
+// identical to regular desktop sizing. That's an accepted, deliberate limitation, not a bug: an
+// earlier attempt to force cards bigger anyway (raising clamp() max ends under a body.desktop-wide
+// class) either overflowed real content behind the log drawer at typical viewport heights, or -- at
+// safe, dialed-back numbers -- only won 1-3px per card, imperceptible and not worth the complexity.
+// Getting 2-3P visibly bigger for real needs an actual layout change (e.g. a persistent side panel
+// for the battle log to free up vertical room), not just a bigger size cap.
 const DESKTOP_MODE_MAX_W=820, DESKTOP_MODE_MAX_H_SQUARE=900;
 let desktopMode=false;
 try{ desktopMode=localStorage.getItem('sy_desktopMode')==='1'; }catch{}
 function setDesktopMode(on){
   desktopMode=on;
   try{ localStorage.setItem('sy_desktopMode', on?'1':'0'); }catch{}
-  document.body.classList.toggle('desktop-wide', on);
   applyFrameScale();
   if(typeof buildTableView==='function' && document.getElementById('game-root').style.display!=='none') buildTableView();
 }
-document.body.classList.toggle('desktop-wide', desktopMode);
 // Real screen pixels map 1:1 to the frame's internal coordinate space UNLESS the phone branch
 // below is active, in which case this is the live CSS scale factor -- kept in sync with whichever
 // branch actually ran so toFrameRect() (floating damage numbers, beams, destroy-clone animations)
@@ -786,8 +775,7 @@ function applyFrameScale(){
   } else if(desktopMode){
     // Explicit Desktop Mode: a bigger width cap than the auto-detected branch below, so the frame
     // fills much more of a real desktop window instead of staying boxed into the narrow 520px-
-    // capped shape. body.desktop-wide's CSS raises the max end of every card/zone clamp() to match,
-    // so the extra cq room actually gets used by bigger content instead of sitting empty.
+    // capped shape.
     //
     // 4P's Table View (a 2x2 grid, comparatively short content) gets to size width and height
     // INDEPENDENTLY -- genuinely square-ish, filling most of the window -- since that shape doesn't
@@ -1112,7 +1100,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v76';
+const GAME_VERSION='v77';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
