@@ -16,8 +16,11 @@
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;min-height:100%;background:#050a07;color:var(--ink);
   font-family:'Segoe UI',Verdana,Arial,sans-serif;overflow-x:hidden;}
+/* Width/height are set dynamically per viewport in applyFrameScale() -- translate(-50%,-50%) is
+   percentage-of-self, so it re-centers correctly no matter what size that ends up being, unlike a
+   fixed pixel margin (which only centered the one original 393x852 box this used to always be). */
 #game-frame{position:fixed;top:50%;left:50%;width:393px;height:852px;
-  margin:-426px 0 0 -196.5px;transform-origin:center center;
+  transform:translate(-50%,-50%);
   container-type:size;container-name:frame;
   background:#050a07;overflow:hidden;visibility:hidden;}
 #game-frame.ready{visibility:visible;}
@@ -78,11 +81,14 @@ button{font-family:inherit;cursor:pointer;}
 @keyframes diespin{0%{transform:rotate(0)}70%{transform:rotate(720deg)}100%{transform:rotate(1080deg)}}
 #version-tag{position:absolute;right:8px;bottom:8px;text-align:right;
   font-size:.68em;color:var(--dim);opacity:.6;pointer-events:none;}
-#recache-btn{display:block;margin:14px auto 0;
+#recache-btn,#desktop-mode-btn{margin:14px 0 0;
   background:#16281c;border:1px solid var(--gold-dim);color:var(--dim);
   font-size:.72em;padding:5px 14px;border-radius:14px;white-space:nowrap;}
-#recache-btn:hover{border-color:var(--gold);color:var(--ink);}
+#recache-btn:hover,#desktop-mode-btn:hover{border-color:var(--gold);color:var(--ink);}
 #recache-btn:disabled{opacity:.6;}
+/* Manual override for applyFrameScale()'s phone-vs-desktop auto-detection (see its own comment) --
+   "on" state mirrors the .mode-tab.sel treatment used elsewhere for an active toggle. */
+#desktop-mode-btn.on{border-color:var(--gold);background:#1c2c1e;color:var(--gold);}
 
 /* ---------- BOARD ---------- */
 #game-root{display:none;position:relative;height:100%;background:
@@ -586,7 +592,10 @@ button{font-family:inherit;cursor:pointer;}
       </div>
     </div>
     <div style="height:10px"></div>
-    <button id="recache-btn" type="button">↻ Force Refresh</button>
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+      <button id="recache-btn" type="button">↻ Force Refresh</button>
+      <button id="desktop-mode-btn" type="button">🖥️ Desktop Mode</button>
+    </div>
   </div>
   <div id="coin-flip-wrap">
     <p class="sub" style="margin:0">Rolling for first turn...</p>
@@ -680,24 +689,65 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-// The whole game lives inside #game-frame, a fixed-resolution box (see applyFrameScale() below)
-// that gets transform:scale()'d to fit whatever the real viewport actually is. Anything appended
-// straight to document.body would sit outside that scaling/positioning entirely, so every dynamic
-// overlay (modals, popups, floating damage numbers, beams, card clones) appends here instead.
+// The whole game lives inside #game-frame (see applyFrameScale() below for how it's actually
+// sized). Anything appended straight to document.body would sit outside that positioning
+// entirely, so every dynamic overlay (modals, popups, floating damage numbers, beams, card
+// clones) appends here instead.
 const gameFrame=document.getElementById('game-frame');
-// #game-frame is a fixed 393x852 design resolution (matches the device this was built/tested
-// against) -- every cqw/cqh unit in the stylesheet is permanently anchored to that, so internal
-// layout is 100% deterministic no matter the real device. This is the only thing that adapts to
-// the actual viewport: scale the whole frame down (never up -- Math.min caps at 1) to fit
-// whichever real dimension is tighter, so it's always fully visible with letterboxing on the
-// other axis instead of ever being cropped.
-const FRAME_W=393, FRAME_H=852;
+// #game-frame's own box IS the design resolution -- every cqw/cqh unit in the stylesheet is
+// anchored to whatever #game-frame's real width/height currently are (container-type:size), so
+// nothing about the internal layout itself needs to know or care what that ends up being; giving
+// the frame a bigger box just naturally makes everything inside it proportionally bigger too.
+// 393x852 (the phone this was originally built/tested against) is the FALLBACK/reference
+// aspect ratio (~0.461) used any time the frame needs to shrink-to-fit or grow-to-fit while
+// preserving proportions, not a hard pixel target anymore.
+const FRAME_W=393, FRAME_H=852, FRAME_ASPECT=FRAME_W/FRAME_H;
+// Desktop/landscape/tablet cap: how wide the frame is ever allowed to stretch on a screen that
+// ISN'T treated as phone-shaped -- "slightly bigger than the original design, never sprawling
+// across an ultra-wide monitor." Deliberately a fixed value, not viewport-relative: real desktop
+// viewports are essentially always wider than this already.
+const DESKTOP_MAX_W=520;
+// No longer driven by a CSS transform:scale() at all (see #game-frame's own CSS comment) -- the
+// frame's actual box size now IS its real on-screen size, so real screen pixels always map 1:1 to
+// the frame's internal coordinate space. Kept (permanently 1) purely so toFrameRect() below,
+// which divides by this, doesn't need its own separate code path.
 let currentFrameScale=1;
+// Manual override for applyFrameScale()'s auto-detection below, toggled from the start screen and
+// persisted so it survives a reload. Auto-detection (a tall/narrow AND touch-primary viewport) is
+// a good default but can't be perfect -- e.g. a real phone rotated into a squarish multitasking
+// split-view, or a desktop user who just prefers the same compact centered layout their phone
+// gets. When on, this always takes the desktop/capped sizing branch below, regardless of the
+// actual viewport's shape or input type.
+let desktopMode=false;
+try{ desktopMode=localStorage.getItem('sy_desktopMode')==='1'; }catch{}
+function setDesktopMode(on){
+  desktopMode=on;
+  try{ localStorage.setItem('sy_desktopMode', on?'1':'0'); }catch{}
+  applyFrameScale();
+}
 function applyFrameScale(){
   const vw=(window.visualViewport && window.visualViewport.width) || window.innerWidth;
   const vh=(window.visualViewport && window.visualViewport.height) || window.innerHeight;
-  currentFrameScale=Math.min(vw/FRAME_W, vh/FRAME_H, 1);
-  gameFrame.style.transform=`scale(${currentFrameScale})`;
+  const coarsePointer = !!(window.matchMedia && window.matchMedia('(pointer:coarse)').matches);
+  // "Clearly rectangular like a phone": tall/narrow AND touch-primary -- a real phone in portrait,
+  // not just any browser window someone happens to have resized tall and narrow. A phone rotated
+  // to landscape, or a squarish tablet, falls through to the capped branch below instead, since
+  // the board's own layout is built portrait-first and would look broken stretched wide and short.
+  const isPhoneShaped = !desktopMode && coarsePointer && vh>=vw*1.4;
+  let w,h;
+  if(isPhoneShaped){
+    // Fill the real screen edge-to-edge -- no letterboxing on either axis.
+    w=vw; h=vh;
+  } else {
+    // Desktop/landscape/tablet: a modest, capped stretch past the original design width, fit to
+    // the viewport height at that same aspect ratio -- shrinking both together (never distorting
+    // it) if even the capped width would be too tall to fit.
+    w=Math.min(vw,DESKTOP_MAX_W);
+    h=w/FRAME_ASPECT;
+    if(h>vh){ h=vh; w=h*FRAME_ASPECT; }
+  }
+  gameFrame.style.width=w+'px';
+  gameFrame.style.height=h+'px';
   gameFrame.classList.add('ready');
 }
 applyFrameScale();
@@ -953,7 +1003,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v71';
+const GAME_VERSION='v72';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -972,6 +1022,14 @@ document.getElementById('recache-btn').addEventListener('click',async()=>{
   url.searchParams.set('_r',Date.now().toString());
   location.replace(url.toString());
 });
+(function initDesktopModeBtn(){
+  const btn=document.getElementById('desktop-mode-btn');
+  btn.classList.toggle('on',desktopMode);
+  btn.addEventListener('click',()=>{
+    setDesktopMode(!desktopMode);
+    btn.classList.toggle('on',desktopMode);
+  });
+})();
 /* ============================= CARD DATABASE ============================= */
 const ATTRS=['LIGHT','DARK','EARTH','WATER','FIRE','WIND'];
 function slug(n){return n.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');}
