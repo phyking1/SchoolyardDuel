@@ -16,8 +16,15 @@
 *{box-sizing:border-box;}
 html,body{margin:0;padding:0;min-height:100%;background:#050a07;color:var(--ink);
   font-family:'Segoe UI',Verdana,Arial,sans-serif;overflow-x:hidden;}
+/* Width/height are set dynamically per viewport in applyFrameScale() -- translate(-50%,-50%) is
+   percentage-of-self, so it re-centers correctly no matter what size that ends up being, unlike a
+   fixed pixel margin (which only centered the one original 393x852 box this used to always be).
+   Keeping a real (non-none) transform here also matters for #detail-panel's mobile bottom-drawer
+   rule below: position:fixed descendants anchor to the nearest transformed ancestor, not the
+   viewport, which is what lets that drawer hug THIS frame's bottom edge instead of the real
+   screen's. */
 #game-frame{position:fixed;top:50%;left:50%;width:393px;height:852px;
-  margin:-426px 0 0 -196.5px;transform-origin:center center;
+  transform:translate(-50%,-50%);
   container-type:size;container-name:frame;
   background:#050a07;overflow:hidden;visibility:hidden;}
 #game-frame.ready{visibility:visible;}
@@ -91,12 +98,18 @@ button{font-family:inherit;cursor:pointer;}
   #030304;
   flex-direction:column;align-items:stretch;justify-content:flex-start;overflow:hidden;}
 #board-wrap{position:relative;display:flex;flex:1 1 auto;min-height:0;}
-/* #board always fills exactly the space left after the fixed bottom log-drawer handle (see the
-   padding-bottom below), in both List and Table View -- never centered-then-possibly-taller-than-
-   viewport. If its own content still doesn't fit (a full 4P List View stack on a short phone), it
-   scrolls internally instead of pushing real content behind that fixed handle. */
+/* #board always fills exactly the space left after the fixed bottom log-drawer handle, in both
+   List and Table View -- never centered-then-possibly-taller-than-viewport. If its own content
+   still doesn't fit (a full 4P List View stack on a short phone), it scrolls internally instead of
+   pushing real content behind that fixed handle. The reservation itself is --log-handle-h, a CSS
+   var kept in sync with the handle's REAL measured height by syncLogHandleReserve() (see the
+   ResizeObserver near applyFrameScale()) -- not a hardcoded guess. A hardcoded px here can only
+   ever be exactly right for one specific frame size; #game-frame's box is no longer fixed (see
+   applyFrameScale()), so a static number and the handle's actual on-screen height WILL drift apart
+   for some viewport at some point. The 48px fallback only covers the instant before that observer
+   fires on first paint.*/
 #board{flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;justify-content:safe center;
-  padding:4px 6px 48px;gap:clamp(2px,.8cqw,8px);min-width:0;min-height:0;overflow-y:auto;}
+  padding:4px 6px var(--log-handle-h,48px);gap:clamp(2px,.8cqw,8px);min-width:0;min-height:0;overflow-y:auto;}
 
 /* health rails: dock health bars to the left/right edges instead of full-width rows */
 .hp-rail{flex:0 0 auto;width:clamp(30px,8cqw,52px);display:flex;flex-direction:column;
@@ -680,30 +693,72 @@ button{font-family:inherit;cursor:pointer;}
 
 <script>
 "use strict";
-// The whole game lives inside #game-frame, a fixed-resolution box (see applyFrameScale() below)
-// that gets transform:scale()'d to fit whatever the real viewport actually is. Anything appended
-// straight to document.body would sit outside that scaling/positioning entirely, so every dynamic
-// overlay (modals, popups, floating damage numbers, beams, card clones) appends here instead.
+// The whole game lives inside #game-frame (see applyFrameScale() below for how it's actually
+// sized). Anything appended straight to document.body would sit outside that positioning
+// entirely, so every dynamic overlay (modals, popups, floating damage numbers, beams, card
+// clones) appends here instead.
 const gameFrame=document.getElementById('game-frame');
-// #game-frame is a fixed 393x852 design resolution (matches the device this was built/tested
-// against) -- every cqw/cqh unit in the stylesheet is permanently anchored to that, so internal
-// layout is 100% deterministic no matter the real device. This is the only thing that adapts to
-// the actual viewport: scale the whole frame down (never up -- Math.min caps at 1) to fit
-// whichever real dimension is tighter, so it's always fully visible with letterboxing on the
-// other axis instead of ever being cropped.
-const FRAME_W=393, FRAME_H=852;
+// #game-frame's own box IS the design resolution -- every cqw/cqh unit in the stylesheet is
+// anchored to whatever #game-frame's real width/height currently are (container-type:size), so
+// nothing about the internal layout itself needs to know or care what that ends up being. 393x852
+// (the phone this was originally built/tested against) is the reference aspect ratio (~0.461),
+// used by both sizing branches below so the frame's proportions are NEVER distorted -- content
+// throughout is sized via cqw (width-driven) clamps, so a box stretched to some other aspect ratio
+// would make cards wider without the matching vertical room to fit them, which is exactly what cut
+// the hand off under the log drawer the first time this was tried with an aspect-ignoring
+// fill-the-viewport formula for phones.
+const FRAME_W=393, FRAME_H=852, FRAME_ASPECT=FRAME_W/FRAME_H;
+// How far the frame is allowed to grow past the reference width on a screen that ISN'T phone-
+// shaped -- "slightly bigger than the original design, never sprawling across an ultra-wide
+// monitor." Fixed, not viewport-relative: real desktop viewports are essentially always wider
+// than this already, so this is the number doing the actual capping.
+const DESKTOP_MAX_W=520;
+// No longer driven by a CSS transform:scale() at all -- the frame's actual box size now IS its
+// real on-screen size, so real screen pixels always map 1:1 to the frame's internal coordinate
+// space. Kept (permanently 1) purely so toFrameRect() below, which divides by this, doesn't need
+// its own separate code path.
 let currentFrameScale=1;
 function applyFrameScale(){
   const vw=(window.visualViewport && window.visualViewport.width) || window.innerWidth;
   const vh=(window.visualViewport && window.visualViewport.height) || window.innerHeight;
-  currentFrameScale=Math.min(vw/FRAME_W, vh/FRAME_H, 1);
-  gameFrame.style.transform=`scale(${currentFrameScale})`;
+  const coarsePointer = !!(window.matchMedia && window.matchMedia('(pointer:coarse)').matches);
+  // "Clearly rectangular like a phone": tall/narrow AND touch-primary -- a real phone in portrait,
+  // not just any browser window someone happens to have resized tall and narrow. A phone rotated
+  // to landscape, or a squarish tablet, falls through to the desktop cap below instead, since the
+  // board's own layout is built portrait-first. Phone-shaped keeps today's exact sizing (capped at
+  // the 393x852 reference, same as always -- the UI was built and tuned around that) rather than
+  // stretching to fill the device; only non-phone-shaped screens get the modest extra stretch.
+  const isPhoneShaped = coarsePointer && vh>=vw*1.4;
+  const capW = isPhoneShaped ? FRAME_W : DESKTOP_MAX_W;
+  // Widest w that fits within the viewport, doesn't exceed the active cap, and (via vh*FRAME_ASPECT)
+  // never makes h taller than the viewport either -- h is then always exactly w/FRAME_ASPECT, so
+  // the reference proportions hold no matter which of the three limits ends up binding.
+  const w=Math.min(vw, capW, vh*FRAME_ASPECT);
+  const h=w/FRAME_ASPECT;
+  gameFrame.style.width=w+'px';
+  gameFrame.style.height=h+'px';
   gameFrame.classList.add('ready');
 }
 applyFrameScale();
 window.addEventListener('resize',applyFrameScale);
 window.addEventListener('orientationchange',applyFrameScale);
 if(window.visualViewport) window.visualViewport.addEventListener('resize',applyFrameScale);
+// Keeps #board's bottom padding (see its own CSS comment) exactly matched to the log drawer
+// handle's REAL rendered height, instead of a hardcoded guess that can only ever be right for one
+// specific frame size. ResizeObserver fires once immediately on observe() and again on any future
+// size change (frame resize, font load, safe-area changes, anything) -- self-correcting by
+// construction, nothing left to keep in sync by hand.
+function syncLogHandleReserve(){
+  const handle=document.getElementById('detail-handle');
+  const h=Math.ceil(handle.getBoundingClientRect().height);
+  if(h>0) document.documentElement.style.setProperty('--log-handle-h', h+'px');
+}
+if(window.ResizeObserver){
+  new ResizeObserver(syncLogHandleReserve).observe(document.getElementById('detail-handle'));
+} else {
+  syncLogHandleReserve();
+  window.addEventListener('resize',syncLogHandleReserve);
+}
 // getBoundingClientRect() always reports real, post-transform screen pixels -- but a position:fixed
 // element APPENDED INSIDE #game-frame is positioned relative to #game-frame's own (pre-transform,
 // 393x852-unit) box, not the real screen. Floating damage numbers/beams/destroy-clones all read a
@@ -953,7 +1008,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v71';
+const GAME_VERSION='v73';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
