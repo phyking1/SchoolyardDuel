@@ -97,6 +97,81 @@ button{font-family:inherit;cursor:pointer;}
    miss at a glance, this needs to read as clearly on/off from across the room. */
 #desktop-mode-btn.on,#lock-ui-btn.on{border-color:var(--gold);background:#1c2c1e;color:var(--gold);}
 
+/* Lock UI's px overrides: on real hardware capped below Safari/iPadOS 16 (e.g. iPad mini 4, stuck
+   at iPadOS 15.8 -- Apple's last update for that model), CSS Container Query units (cqw/cqh) don't
+   exist as a browser feature at all, on ANY browser, since every iOS/iPadOS browser is required to
+   use Apple's own WebKit regardless of brand. Every cqw/cqh use in this stylesheet sits inside a
+   clamp()/min(), and an unsupported unit invalidates the whole declaration -- and #game-frame is
+   the query container for literally all card/zone/panel sizing in the game, so on such a device
+   this isn't cosmetic, it's structural: sizes fall back to whatever's left once the invalidated
+   declaration drops out, which is exactly the "everything is wonky, oversized, overlapping" report
+   from a real iPad. Turning on Lock UI's frame-scale mechanism alone (the transform on #game-frame
+   itself) can't fix this -- that only controls the OUTER frame's size/position, a completely
+   different property from the cqw/cqh-driven sizing failing inside it.
+   Fix: while Lock UI is on, override every cqw/cqh-driven rule below with the literal px value it
+   already resolves to -- Lock UI's frame is ALWAYS exactly 393x852 (FRAME_W x FRAME_H) whenever
+   active, so these aren't approximations, they're the exact numbers cqw/cqh compute to at that
+   fixed size (1cqw=3.93px, 1cqh=8.52px), just spelled out in a unit every browser back to Safari 3
+   understands. This is genuinely what "lock into a fixed resolution" means -- the same plain-px
+   approach v71 used everywhere, before container queries entered this codebase at all. Values below
+   were verified against the live computed styles of a real 393x852 frame (Chromium/Playwright), not
+   hand-derived, then cross-checked against the clamp() math by hand -- both agreed exactly.
+   KEEP IN SYNC: if any cqw/cqh source rule above this comment is ever changed, its px equivalent
+   below must be recomputed too (1cqw=3.93px, 1cqh=8.52px at the fixed 393x852 frame) -- there's no
+   build step tying these together, so a drifted number here is a silent bug exactly like this
+   project's other hand-maintained mirrors. */
+body.lock-ui-on .logo-img{width:345.84px;}
+body.lock-ui-on #setup-wrap{max-width:369.42px;}
+body.lock-ui-on .health-btn{font-size:14.4px;}
+body.lock-ui-on #board{gap:3.144px;}
+body.lock-ui-on .hp-rail{width:31.44px;}
+body.lock-ui-on .hp-rail-name{font-size:8.8px;}
+body.lock-ui-on .hp-rail-bar-wrap{width:11.79px;}
+body.lock-ui-on .hp-rail-num{font-size:9.6px;}
+body.lock-ui-on .hp-rail-extra{font-size:8.32px;}
+body.lock-ui-on .zone-row{gap:6.288px;}
+body.lock-ui-on .zone{width:51.09px;height:78.6px;}
+body.lock-ui-on .zone-row.compact{gap:3.93px;}
+body.lock-ui-on .zone-row.compact .zone{width:31.44px;height:49.518px;}
+body.lock-ui-on .hand-row.compact{min-height:31.44px;gap:3.144px;}
+body.lock-ui-on .hand-row.compact .card{width:30.261px;height:48.732px;}
+body.lock-ui-on #board.two-player-mode .zone{width:68.775px;height:106.11px;}
+body.lock-ui-on #board.two-player-mode .card{width:65.631px;height:106.11px;}
+body.lock-ui-on #board.two-player-mode .zone-row{gap:8.646px;}
+body.lock-ui-on #board.two-player-mode .hand-row{gap:6.288px;}
+body.lock-ui-on .opp-panel-name{font-size:8.8px;max-width:86.46px;}
+body.lock-ui-on .opp-hp-bar-wrap{height:9.432px;}
+body.lock-ui-on .opp-hp-num{font-size:8.8px;}
+body.lock-ui-on .opp-hand-count{font-size:8px;}
+body.lock-ui-on .table-dual-top .zone-row.compact .zone{width:40px;height:63px;}
+body.lock-ui-on .table-dual-top .hand-row.compact .card{width:38px;height:62px;}
+body.lock-ui-on .hand-row{gap:4.716px;min-height:72.312px;}
+body.lock-ui-on .hand-row.opp{min-height:49.518px;}
+body.lock-ui-on .center-row{gap:11.79px;}
+body.lock-ui-on .pile{width:31.44px;height:44.016px;}
+body.lock-ui-on #turn-banner{font-size:10.88px;}
+body.lock-ui-on #mod-chip{font-size:9.6px;}
+body.lock-ui-on .card.zoom{width:172.92px;height:242.088px;font-size:15.72px;}
+body.lock-ui-on .modal{max-height:681.6px;}
+body.lock-ui-on #log-modal-list{max-height:511.2px;}
+body.lock-ui-on .card-list-rows{max-height:426px;}
+body.lock-ui-on #turn-flash-text{font-size:19.65px;transform:translateX(-510.9px);}
+body.lock-ui-on #detail-panel{max-height:272.64px;}
+body.lock-ui-on #log-panel{max-height:221.52px;}
+body.lock-ui-on .card{width:48.732px;height:78.6px;font-size:8.646px;}
+/* Duplicate of @keyframes turnFlash (line ~495) with the cqw-based translateX swapped for its px
+   equivalent -- keyframe rules can't be scoped by an ancestor selector, so the animation-name itself
+   is swapped instead (see the body.lock-ui-on #turn-flash-text.show rule below). Everything else
+   (duration, easing, fill-mode) still comes from the original .show rule's `animation` shorthand;
+   only animation-name is overridden here. */
+@keyframes turnFlashFixed{
+  0%{transform:translateX(-510.9px);opacity:0;}
+  16%{transform:translateX(0);opacity:1;}
+  72%{transform:translateX(0);opacity:1;}
+  100%{transform:translateX(510.9px);opacity:0;}
+}
+body.lock-ui-on #turn-flash-text.show{animation-name:turnFlashFixed;}
+
 /* ---------- BOARD ---------- */
 #game-root{display:none;position:relative;height:100%;background:
   radial-gradient(ellipse 100% 60% at 50% 0%,rgba(139,0,0,.65),transparent 60%),
@@ -785,9 +860,14 @@ function setDesktopMode(on){
 // zoom trick, since that's a second, independent source of the same class of sizing risk.
 let lockUI=false;
 try{ lockUI=localStorage.getItem('sy_lockUI')==='1'; }catch{}
+document.body.classList.toggle('lock-ui-on',lockUI);
 function setLockUI(on){
   lockUI=on;
   try{ localStorage.setItem('sy_lockUI', on?'1':'0'); }catch{}
+  // Scopes the fixed-px CSS overrides right below the Lock UI CSS comment above -- see that comment
+  // for why cqw/cqh-based sizing needs a real, hard px fallback rather than just resizing the outer
+  // frame.
+  document.body.classList.toggle('lock-ui-on',on);
   // Desktop Mode also independently feeds buildTableView()'s zoomedFourP check (the 4-player
   // dual-panel grid), separate from applyFrameScale()'s own frame sizing -- neutralize it too, not
   // just override the frame size, so Lock UI actually turns off every path into that layout.
@@ -1225,7 +1305,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v87';
+const GAME_VERSION='v88';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 // Shared by the "↻ Force Refresh" button and Lock UI (Safe Mode) -- see hardRefresh()'s own comment
 // on why turning Lock UI on also forces this.
