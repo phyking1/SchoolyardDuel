@@ -1225,11 +1225,11 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v86';
+const GAME_VERSION='v87';
 document.getElementById('version-tag').textContent=GAME_VERSION;
-document.getElementById('recache-btn').addEventListener('click',async()=>{
-  const btn=document.getElementById('recache-btn');
-  btn.disabled=true; btn.textContent='Refreshing…';
+// Shared by the "↻ Force Refresh" button and Lock UI (Safe Mode) -- see hardRefresh()'s own comment
+// on why turning Lock UI on also forces this.
+async function hardRefresh(){
   try{
     if(window.caches && caches.keys){
       const keys=await caches.keys();
@@ -1243,6 +1243,11 @@ document.getElementById('recache-btn').addEventListener('click',async()=>{
   const url=new URL(location.href);
   url.searchParams.set('_r',Date.now().toString());
   location.replace(url.toString());
+}
+document.getElementById('recache-btn').addEventListener('click',async()=>{
+  const btn=document.getElementById('recache-btn');
+  btn.disabled=true; btn.textContent='Refreshing…';
+  await hardRefresh();
 });
 (function initDesktopModeBtn(){
   const btn=document.getElementById('desktop-mode-btn');
@@ -1266,13 +1271,22 @@ document.getElementById('recache-btn').addEventListener('click',async()=>{
   };
   paint();
   btn.addEventListener('click',()=>{
-    setLockUI(!lockUI);
+    const turningOn=!lockUI;
+    setLockUI(turningOn);
     paint();
     // setLockUI may have also turned Desktop Mode off -- repaint that button too so it doesn't show
     // stale "on" state.
     const dBtn=document.getElementById('desktop-mode-btn'), dCheck=document.getElementById('desktop-mode-check');
     dBtn.classList.toggle('on',desktopMode);
     dCheck.textContent=desktopMode?'☑':'☐';
+    // Turning Lock UI ON is the "something is rendering wrong, get me back to a known-good state"
+    // panic button -- if the reason the fixed-frame sizing above isn't taking effect is that the
+    // device is still running JS cached from before this feature existed (this project has a known,
+    // pre-existing stale-cache problem -- see the "↻ Force Refresh" button), toggling the setting
+    // alone can't fix that: stale code can't know to read the new sy_lockUI flag. Force the same
+    // cache-clear + cache-busted reload #recache-btn does, so the very next load is guaranteed to run
+    // current code with lockUI already true from localStorage.
+    if(turningOn) hardRefresh();
   });
 })();
 /* ============================= CARD DATABASE ============================= */
