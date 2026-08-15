@@ -1100,7 +1100,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v77';
+const GAME_VERSION='v78';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -2112,11 +2112,33 @@ function buildZoomCard(card,faceDown){
   }
   return d;
 }
+// .c-desc's font-size (.92em, see its own CSS comment) is tuned to read comfortably for a SHORT
+// effect -- long ones (Lava Golem, Amazoness Swords Woman, etc.) overflow that fixed-height box and
+// fall back to overflow-y:auto scrolling. Shrinks the description specifically (nothing else on the
+// card) in small steps until it fits without scrolling, or hits a floor past which it'd stop being
+// legible -- most cards need no shrink at all and keep the full, comfortably-large v71 size.
+function fitCardDescription(desc){
+  desc.style.fontSize='';
+  const baseSize=parseFloat(getComputedStyle(desc).fontSize);
+  // 6px is the real floor -- text below that stops being legible regardless of how much room it'd
+  // save, so past this point overflow-y:auto (see .c-desc's own CSS) is the honest fallback rather
+  // than shrinking further. Every effect currently in the card database fits well above this floor
+  // even at its longest (Lava Golem, Wattlemur, Amazoness Swords Woman) -- confirmed directly at the
+  // smallest popup size (a phone-shaped frame near .card.zoom's own clamp minimum).
+  const minSize=Math.max(baseSize*0.45,6);
+  let size=baseSize;
+  while(desc.scrollHeight>desc.clientHeight+1 && size>minSize){
+    size-=0.3;
+    desc.style.fontSize=size+'px';
+  }
+}
 function showCardPopup(card,faceDown){
   const inner=document.getElementById('card-popup-inner');
   inner.innerHTML='';
   inner.appendChild(buildZoomCard(card,faceDown));
   document.getElementById('card-popup').classList.add('show');
+  const desc=inner.querySelector('.c-desc');
+  if(desc) fitCardDescription(desc);
 }
 function hideCardPopup(){
   document.getElementById('card-popup').classList.remove('show');
