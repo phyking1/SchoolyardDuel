@@ -135,6 +135,12 @@ button{font-family:inherit;cursor:pointer;}
 .zone-row{display:flex;justify-content:center;gap:clamp(4px,1.6cqw,8px);flex:0 0 auto;padding:2px 0;}
 .zone{width:clamp(38px,13cqw,64px);height:clamp(61px,20cqw,98px);border-radius:6px;position:relative;
   display:flex;align-items:center;justify-content:center;transition:box-shadow .15s;flex-shrink:0;}
+/* Desktop Mode: raises the MAX end of every card/zone clamp() below so the extra cq room a wider
+   frame provides (see DESKTOP_MODE_MAX_W/_H in applyFrameScale()) actually gets used by bigger
+   content, instead of cards capping out early and just leaving empty space around them. Kept
+   deliberately modest (not proportional to the full width/height increase) -- 2-3P's content is a
+   single stacked column with real vertical headroom limits; see that branch's own comment. */
+body.desktop-wide .zone{width:clamp(38px,13cqw,74px);height:clamp(61px,20cqw,113px);}
 .zone.mon{background:var(--zone);border:2px dashed var(--zone-border);}
 .zone.mon[data-side="1"]{background:#2a1013;border-color:#8a2a35;}
 .zone.mon[data-side="0"]{background:#0d1a2a;border-color:#2a6bb0;}
@@ -149,6 +155,8 @@ button{font-family:inherit;cursor:pointer;}
 .zone-row.compact .zone{width:clamp(24px,8cqw,40px);height:clamp(38px,12.6cqw,62px);}
 .hand-row.compact{min-height:clamp(28px,8cqw,44px);gap:clamp(2px,.8cqw,4px);}
 .hand-row.compact .card{width:clamp(22px,7.7cqw,37px);height:clamp(36px,12.4cqw,58px);}
+body.desktop-wide .zone-row.compact .zone{width:clamp(24px,8cqw,46px);height:clamp(38px,12.6cqw,71px);}
+body.desktop-wide .hand-row.compact .card{width:clamp(22px,7.7cqw,43px);height:clamp(36px,12.4cqw,67px);}
 
 /* stacked opponent panels: one per living seat other than the human, all visible simultaneously */
 #opp-stack{display:flex;flex-direction:column;gap:6px;padding:2px 0;}
@@ -177,6 +185,8 @@ button{font-family:inherit;cursor:pointer;}
 #board.two-player-mode .zone{width:clamp(51px,17.5cqw,86px);height:clamp(82px,27cqw,132px);}
 #board.two-player-mode .card{width:clamp(49px,16.7cqw,81px);height:clamp(78px,27cqw,127px);}
 #board.two-player-mode .zone-row{gap:clamp(5px,2.2cqw,11px);}
+body.desktop-wide #board.two-player-mode .zone{width:clamp(51px,17.5cqw,99px);height:clamp(82px,27cqw,152px);}
+body.desktop-wide #board.two-player-mode .card{width:clamp(49px,16.7cqw,93px);height:clamp(78px,27cqw,146px);}
 #board.two-player-mode .hand-row{gap:clamp(4px,1.6cqw,8px);}
 .opp-panel-header{display:flex;align-items:center;gap:6px;padding:0 2px;}
 .opp-panel-name{font-size:clamp(.55em,1.8cqw,.72em);font-weight:800;color:var(--gold);
@@ -238,6 +248,8 @@ button{font-family:inherit;cursor:pointer;}
    unused whitespace around small cards. */
 .table-dual-top .zone-row.compact .zone{width:clamp(28px,10.3cqw,40px);height:clamp(44px,16.2cqw,63px);}
 .table-dual-top .hand-row.compact .card{width:clamp(27px,9.9cqw,38px);height:clamp(42px,15.9cqw,62px);}
+body.desktop-wide .table-dual-top .zone-row.compact .zone{width:clamp(28px,10.3cqw,46px);height:clamp(44px,16.2cqw,72px);}
+body.desktop-wide .table-dual-top .hand-row.compact .card{width:clamp(27px,9.9cqw,44px);height:clamp(42px,15.9cqw,71px);}
 
 .hand-row{display:flex;justify-content:center;gap:clamp(3px,1.2cqw,6px);flex:0 0 auto;padding:4px 0;
   min-height:clamp(66px,18.4cqw,106px);align-items:flex-end;flex-wrap:wrap;}
@@ -303,6 +315,8 @@ button{font-family:inherit;cursor:pointer;}
 .card{width:clamp(36px,12.4cqw,60px);height:clamp(58px,20cqw,94px);border-radius:5px;
   position:relative;overflow:hidden;cursor:pointer;transition:transform .12s;flex-shrink:0;
   user-select:none;font-size:clamp(7px,2.2cqw,12px);}
+body.desktop-wide .card{width:clamp(36px,12.4cqw,69px);height:clamp(58px,20cqw,108px);
+  font-size:clamp(7px,2.2cqw,14px);}
 .card:hover{transform:translateY(-6px);z-index:5;}
 .card.selected{outline:3px solid var(--gold);outline-offset:1px;transform:translateY(-6px);}
 .card.big{width:110px;height:154px;font-size:12px;}
@@ -726,16 +740,29 @@ const FRAME_W=393, FRAME_H=852, FRAME_ASPECT=FRAME_W/FRAME_H;
 // How far the frame is allowed to grow past the reference width on a screen that ISN'T phone-
 // shaped -- "slightly bigger than the original design, never sprawling across an ultra-wide
 // monitor." Fixed, not viewport-relative: real desktop viewports are essentially always wider than
-// this already, so this is the number doing the actual capping.
+// this already, so this is the number doing the actual capping. Only applies to the AUTO-detected
+// desktop branch (a phone-shaped device is never auto-detected as this); the explicit desktopMode
+// toggle below gets its own, more generous treatment.
 const DESKTOP_MAX_W=520;
+// desktopMode's size caps -- see applyFrameScale()'s desktopMode branch for how these get used
+// differently for 4P (width/height independent, genuinely square-ish) vs 2-3P (aspect-tied to
+// FRAME_ASPECT like the auto-detected branch, just with this bigger width cap -- 2-3P's content has
+// no real slack to spend on becoming square without overflowing, measured directly).
+// body.desktop-wide's CSS (see .zone/.card rules) raises the max end of every clamp() so cards/
+// zones actually grow to use the extra room, rather than leaving dead space around still-capped
+// content. DESKTOP_MODE_MAX_H_SQUARE was confirmed to comfortably fit 4P's single-page layout
+// (well under 900px needed).
+const DESKTOP_MODE_MAX_W=820, DESKTOP_MODE_MAX_H_SQUARE=900;
 let desktopMode=false;
 try{ desktopMode=localStorage.getItem('sy_desktopMode')==='1'; }catch{}
 function setDesktopMode(on){
   desktopMode=on;
   try{ localStorage.setItem('sy_desktopMode', on?'1':'0'); }catch{}
+  document.body.classList.toggle('desktop-wide', on);
   applyFrameScale();
   if(typeof buildTableView==='function' && document.getElementById('game-root').style.display!=='none') buildTableView();
 }
+document.body.classList.toggle('desktop-wide', desktopMode);
 // Real screen pixels map 1:1 to the frame's internal coordinate space UNLESS the phone branch
 // below is active, in which case this is the live CSS scale factor -- kept in sync with whichever
 // branch actually ran so toFrameRect() (floating damage numbers, beams, destroy-clone animations)
@@ -756,18 +783,46 @@ function applyFrameScale(){
     gameFrame.style.width=FRAME_W+'px';
     gameFrame.style.height=FRAME_H+'px';
     gameFrame.style.transform=`translate(-50%,-50%) scale(${currentFrameScale})`;
-  } else {
+  } else if(desktopMode){
+    // Explicit Desktop Mode: a bigger width cap than the auto-detected branch below, so the frame
+    // fills much more of a real desktop window instead of staying boxed into the narrow 520px-
+    // capped shape. body.desktop-wide's CSS raises the max end of every card/zone clamp() to match,
+    // so the extra cq room actually gets used by bigger content instead of sitting empty.
+    //
+    // 4P's Table View (a 2x2 grid, comparatively short content) gets to size width and height
+    // INDEPENDENTLY -- genuinely square-ish, filling most of the window -- since that shape doesn't
+    // have the constraint the branch below explains.
+    //
+    // 2-3P (a single stacked column: opponent zones, your zones, hand, health) does NOT get that
+    // same independent treatment: measured directly, its content's real height need tracks its
+    // width at almost exactly the ORIGINAL 393:852 ratio (852px of content at 393px wide, 1127px at
+    // 520px wide -- a near-perfect match to FRAME_ASPECT already, no real slack to spend). Decoupling
+    // width from height for 2-3P the way 4P gets would need height to grow at that same rate to stay
+    // safe, which isn't "square" at all -- it's just a bigger multiple of today's shape. So 2-3P
+    // keeps the SAME aspect-tied formula the auto-detected branch below already uses (proven safe at
+    // any viewport height), just with this bigger cap -- genuinely wider on any window tall enough
+    // to make use of it, identical to today on a shorter one, but never at risk of overflowing.
     currentFrameScale=1;
-    // Widest w that fits within the viewport, doesn't exceed DESKTOP_MAX_W, and (via
-    // vh*FRAME_ASPECT) never makes h taller than the viewport either -- h is then always exactly
-    // w/FRAME_ASPECT, so the reference proportions hold no matter which limit ends up binding.
-    // A wider cap here would NOT help 4P fit more boards without panning: on any realistic desktop
-    // window, vh*FRAME_ASPECT (the aspect-preserving height constraint) binds long before any width
-    // cap would, since reaching e.g. 900px wide at this aspect needs ~1950px of viewport height.
-    // What actually fixes 4P fitting is desktopMode forcing buildTableView()'s zoomedFourP
-    // single-page layout (see its own comment) -- that adapts to whatever width IS available via
-    // the same compact cqw-driven sizing the mobile zoom-out button already relies on, rather than
-    // needing the frame itself to be wider.
+    const isFourPGrid = typeof G!=='undefined' && G && G.numPlayers===4;
+    let w, h;
+    if(isFourPGrid){
+      w=Math.min(vw, DESKTOP_MODE_MAX_W);
+      h=Math.min(vh, DESKTOP_MODE_MAX_H_SQUARE);
+    } else {
+      w=Math.min(vw, DESKTOP_MODE_MAX_W, vh*FRAME_ASPECT);
+      h=w/FRAME_ASPECT;
+    }
+    gameFrame.style.width=w+'px';
+    gameFrame.style.height=h+'px';
+    gameFrame.style.transform='translate(-50%,-50%)';
+  } else {
+    // Auto-detected desktop (desktopMode NOT explicitly on): stays aspect-locked to the 393:852
+    // reference, just a modest stretch past it -- "slightly bigger, never sprawling" is the default
+    // until someone opts into the bigger change above. Widest w that fits within the viewport,
+    // doesn't exceed DESKTOP_MAX_W, and (via vh*FRAME_ASPECT) never makes h taller than the
+    // viewport either -- h is then always exactly w/FRAME_ASPECT, so the reference proportions hold
+    // no matter which limit ends up binding.
+    currentFrameScale=1;
     const w=Math.min(vw, DESKTOP_MAX_W, vh*FRAME_ASPECT);
     const h=w/FRAME_ASPECT;
     gameFrame.style.width=w+'px';
@@ -992,6 +1047,7 @@ function receiveOnlineRelay(fromSeat,payload){
       document.getElementById('exitgame-btn').style.display='flex';
       document.getElementById('board').classList.toggle('two-player-mode',G.numPlayers===2);
       document.getElementById('board-wrap').classList.toggle('two-player-mode',G.numPlayers===2);
+      applyFrameScale();
       document.getElementById('zoom-toggle-btn').style.display=G.numPlayers===4?'flex':'none';
       document.getElementById('board-wrap').classList.remove('zoomed-out');
       document.getElementById('zoom-toggle-btn').classList.remove('active');
@@ -1045,7 +1101,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v74';
+const GAME_VERSION='v75';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1570,6 +1626,7 @@ function beginDuel(){
   document.getElementById('exitgame-btn').style.display='flex';
   document.getElementById('board').classList.toggle('two-player-mode',G.numPlayers===2);
   document.getElementById('board-wrap').classList.toggle('two-player-mode',G.numPlayers===2);
+  applyFrameScale();
   document.getElementById('zoom-toggle-btn').style.display=G.numPlayers===4?'flex':'none';
   document.getElementById('board-wrap').classList.remove('zoomed-out');
   document.getElementById('zoom-toggle-btn').classList.remove('active');
