@@ -236,8 +236,19 @@ button{font-family:inherit;cursor:pointer;}
    solo-page padding reclaim above there's meaningfully more width per panel here than the shared
    .compact baseline assumes -- size cards up to actually fill it instead of leaving it as
    unused whitespace around small cards. */
-.table-dual-top .zone-row.compact .zone{width:clamp(28px,10.3cqw,40px);height:clamp(44px,16.2cqw,63px);}
-.table-dual-top .hand-row.compact .card{width:clamp(27px,9.9cqw,38px);height:clamp(42px,15.9cqw,62px);}
+/* The 40px/38px ceilings this used to have are sized for a mobile-width frame (~393px, where the
+   10.3cqw/9.9cqw preferred values land at almost exactly those numbers anyway, so raising them
+   changes nothing there) -- Desktop Mode's 4-player grid runs the frame up to 820px wide, where
+   the same cqw math wants ~85px zones but was getting clamped down to 40px, leaving the panel's
+   real estate mostly empty around tiny cards.
+   Height can't just follow the same cqw-based formula once raised, though: Desktop Mode's 4P grid
+   sizes width and height independently (a real monitor can land on a wide-but-short window, e.g.
+   820x720 rather than the 820x900 square cap), and a cqw-only height doesn't shrink at all when
+   the frame gets shorter -- it only overflowed once the ceiling was high enough to matter. Taking
+   the min() against a cqh-based term makes height actually respond to the frame's real available
+   height too, so it shrinks along with a short window instead of overflowing the panel. */
+.table-dual-top .zone-row.compact .zone{width:clamp(28px,10.3cqw,67px);height:clamp(44px,min(16.2cqw,10.5cqh),105px);}
+.table-dual-top .hand-row.compact .card{width:clamp(27px,9.9cqw,60px);height:clamp(42px,min(15.9cqw,10.3cqh),98px);}
 
 .hand-row{display:flex;justify-content:center;gap:clamp(3px,1.2cqw,6px);flex:0 0 auto;padding:4px 0;
   min-height:clamp(66px,18.4cqw,106px);align-items:flex-end;flex-wrap:wrap;}
@@ -1166,7 +1177,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v83';
+const GAME_VERSION='v84';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
