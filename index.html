@@ -1166,7 +1166,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v81';
+const GAME_VERSION='v82';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -2139,24 +2139,24 @@ function triggerOnDestroyedByBattle(pIdx,card,destroyerSide){
 }
 function triggerOnSentToGY(pIdx,card){
   if(base(card).fx==='witch_of_the_black_forest'){
-    const opp=pIdx;
-    const deck=G.deck;
-    const opts=deck.map((c,i)=>({c,i})).filter(o=>isMonster(o.c)&&base(o.c).def<=1500);
-    if(opts.length){
-      // auto for bot, prompt for human
-      if(pIdx===ME){
-        askSeatChoice(pIdx,'Witch of the Black Forest',`Add 1 monster with 1500 or less DEF from your Deck to your hand?`,[
-          {label:'Search',action:()=>{ const pick=opts[Math.floor(Math.random()*opts.length)]; deck.splice(pick.i,1); G.deck=deck; G.players[pIdx].hand.push(pick.c); shuffleAfterSearch(); log(`Added ${base(pick.c).n} to hand.`,'me'); render(); }},
-          {label:'Skip',action:()=>{}},
-        ]);
-      } else {
-        const pick=opts[Math.floor(Math.random()*opts.length)];
-        G.deck=G.deck.filter(c=>c.uid!==pick.c.uid);
-        G.players[pIdx].hand.push(pick.c);
-        shuffleAfterSearch();
-        log(`Bot's Witch of the Black Forest added a monster to hand.`,'opp');
-        render();
-      }
+    const opts=G.deck.map((c,i)=>({c,i})).filter(o=>isMonster(o.c)&&base(o.c).def<=1500);
+    if(!opts.length) return;
+    const pick=(chosen)=>{
+      G.deck=G.deck.filter(c=>c.uid!==chosen.uid);
+      G.players[pIdx].hand.push(chosen);
+      shuffleAfterSearch();
+      log(`${pIdx===ME?'You add':pName(pIdx)+' adds'} ${base(chosen).n} to hand (Witch of the Black Forest).`,pIdx===ME?'me':'opp');
+      render();
+    };
+    if(G.isBot[pIdx]){
+      pick(opts[Math.floor(Math.random()*opts.length)].c);
+    } else {
+      askSeatChoice(pIdx,'Witch of the Black Forest','Add 1 monster with 1500 or less DEF from your Deck to your hand?',[
+        {label:'Search',action:()=>{
+          askSeatChoice(pIdx,'Witch of the Black Forest','Choose which monster to add:',opts.map(o=>({label:base(o.c).n,action:()=>pick(o.c)})));
+        }},
+        {label:'Skip',action:()=>{}},
+      ]);
     }
   }
 }
@@ -2651,6 +2651,44 @@ function openTributeModal(card,idx,need,tributeSide,onConfirm){
 function openLavaGolemTributeModal(card,targetOpp){
   openTributeModal(card,-1,2,targetOpp,(tribs)=>dispatchAction('finishLavaGolemSummonFor',ME,card.uid,tribs,targetOpp));
 }
+// Mirrors openTributeModal's checkbox-list pattern, but for an unbounded-below/capped-above pick
+// ("up to 5") instead of an exact count -- Confirm is always enabled, even with nothing selected.
+function openMultiPickModal(title,hint,options,max,onConfirm){
+  const selected=new Set();
+  const bg=document.createElement('div'); bg.className='modal-bg';
+  const m=document.createElement('div'); m.className='modal';
+  const head=document.createElement('h3'); head.textContent=title;
+  const counter=document.createElement('p'); counter.className='hint'; counter.textContent=hint;
+  const status=document.createElement('p'); status.className='hint';
+  const list=document.createElement('div'); list.className='card-list-rows';
+  m.append(head,counter,list,status);
+
+  function refresh(){ status.textContent=`Selected ${selected.size} of up to ${max}.`; }
+  options.forEach(o=>{
+    const row=document.createElement('div'); row.className='card-list-row tribute-row';
+    const check=document.createElement('span'); check.className='tribute-check'; check.textContent='⬜';
+    const icon=document.createElement('span'); icon.className='clr-icon'; icon.textContent=o.em||'❓';
+    const name=document.createElement('span'); name.className='clr-name'; name.textContent=o.label;
+    const tag=document.createElement('span'); tag.className='clr-tag'; tag.textContent=o.tag||'';
+    row.append(check,icon,name,tag);
+    row.addEventListener('click',()=>{
+      if(selected.has(o.id)){ selected.delete(o.id); row.classList.remove('checked'); check.textContent='⬜'; }
+      else { if(selected.size>=max){ toast(`You can only pick up to ${max}.`); return; } selected.add(o.id); row.classList.add('checked'); check.textContent='✅'; }
+      refresh();
+    });
+    list.appendChild(row);
+  });
+
+  const btnRow=document.createElement('div'); btnRow.className='mrow';
+  const confirmBtn=document.createElement('div'); confirmBtn.className='mopt primary';
+  confirmBtn.innerHTML='<span class="mopt-label">Confirm</span>';
+  confirmBtn.addEventListener('click',()=>{ gameFrame.removeChild(bg); onConfirm([...selected]); });
+  btnRow.appendChild(confirmBtn);
+  m.appendChild(btnRow);
+
+  bg.appendChild(m); gameFrame.appendChild(bg);
+  refresh();
+}
 function finishLavaGolemSummon(card,tributeIdxs,targetOpp){
   tributeIdxs.sort((a,b)=>b-a).forEach(i=>{
     const t=G.players[targetOpp].mon[i];
@@ -3128,10 +3166,17 @@ function triggerFlip(pIdx,card,idx,onDone){
       const hasTarget=(s)=>G.players[s].mon.some(m=>m && !m.faceDown && m.pos==='def' && effDef(m)<=effAtk(card) && !m.unaffectedByEffects);
       const eligibleOpponents=livingSeats().filter(s=>s!==pIdx && hasTarget(s));
       if(eligibleOpponents.length){
-        const opp=eligibleOpponents[Math.floor(Math.random()*eligibleOpponents.length)];
-        const targets=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown && m.pos==='def' && effDef(m)<=effAtk(card) && !m.unaffectedByEffects) targets.push(i); });
-        const i=targets[Math.floor(Math.random()*targets.length)];
-        log(`Silver Fang flips heads and destroys ${base(G.players[opp].mon[i]).n}.`,pIdx===ME?'me':'opp'); sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect',pIdx); render();
+        const getTargets=(opp)=>{ const arr=[]; G.players[opp].mon.forEach((m,i)=>{ if(m && !m.faceDown && m.pos==='def' && effDef(m)<=effAtk(card) && !m.unaffectedByEffects) arr.push({idx:i,label:base(m).n}); }); return arr; };
+        // Real opponent+target choice (matching Hunter Dragon/Time Wizard's pattern via the shared
+        // chooseOpponentThenTarget helper) instead of picking both randomly, even for a human.
+        chooseOpponentThenTarget(pIdx,eligibleOpponents,getTargets,(opp,i)=>{
+          if(opp==null){ done(); return; }
+          log(`Silver Fang flips heads and destroys ${base(G.players[opp].mon[i]).n}.`,pIdx===ME?'me':'opp');
+          sendToGY(opp,G.players[opp].mon[i],'mon',i,'effect',pIdx);
+          render();
+          done();
+        });
+        return;
       }
       else log('Silver Fang flips heads but had no valid target.','sys');
     } else log('Silver Fang flips tails — no effect.','sys');
@@ -3139,8 +3184,11 @@ function triggerFlip(pIdx,card,idx,onDone){
   }
   else if(fx==='oppressed_people'){
     const opts=G.deck.map((c,i)=>({c,i})).filter(o=>isMonster(o.c)&&base(o.c).atk<=1000);
-    if(opts.length){ const pick=opts[Math.floor(Math.random()*opts.length)]; G.deck=G.deck.filter(c=>c.uid!==pick.c.uid); G.players[pIdx].hand.push(pick.c); shuffleAfterSearch(); log(`${pIdx===ME?'You':'Bot'} added a low-ATK monster to hand (Oppressed People).`,pIdx===ME?'me':'opp'); render(); }
-    done();
+    if(opts.length){
+      const pick=(chosen)=>{ G.deck=G.deck.filter(c=>c.uid!==chosen.uid); G.players[pIdx].hand.push(chosen); shuffleAfterSearch(); log(`${pIdx===ME?'You add':pName(pIdx)+' adds'} ${base(chosen).n} to hand (Oppressed People).`,pIdx===ME?'me':'opp'); render(); done(); };
+      if(G.isBot[pIdx]) pick(opts[Math.floor(Math.random()*opts.length)].c);
+      else askSeatChoice(pIdx,'Oppressed People','Add which monster (1000 ATK or less) to your hand?',opts.map(o=>({label:base(o.c).n,action:()=>pick(o.c)})));
+    } else done();
   }
   else done();
 }
@@ -3636,9 +3684,17 @@ function resolveSpellTrapEffect(pIdx,card,idx){
       toGYSelf(); break;
     }
     case 'jar_of_avarice': {
-      const mons=G.gy.filter(c=>isMonster(c)).slice(0,5);
-      mons.forEach(c=>{ G.gy=G.gy.filter(x=>x.uid!==c.uid); G.deck.push(c); });
-      shuffle(G.deck); drawCard(pIdx); toGYSelf(); break;
+      const gyMons=G.gy.filter(c=>isMonster(c));
+      const doIt=(uids)=>{
+        uids.forEach(uid=>{ const c=G.gy.find(x=>x.uid===uid); if(c){ G.gy=G.gy.filter(x=>x.uid!==uid); G.deck.push(c); } });
+        shuffle(G.deck); drawCard(pIdx); render();
+      };
+      if(gyMons.length){
+        if(G.isBot[pIdx]) doIt(gyMons.slice(0,5).map(c=>c.uid));
+        else openMultiPickModal('Jar of Avarice','Choose up to 5 monsters from the Graveyard to shuffle into the Deck:',
+          gyMons.map(c=>({id:c.uid,label:base(c).n,em:base(c).em,tag:`Lv${base(c).l} ${base(c).atk}/${base(c).def}`})),5,doIt);
+      } else drawCard(pIdx);
+      toGYSelf(); break;
     }
     case 'pot_of_duality': {
       const top=G.deck.slice(-3);
