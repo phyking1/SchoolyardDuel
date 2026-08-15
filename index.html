@@ -85,11 +85,17 @@ button{font-family:inherit;cursor:pointer;}
 @keyframes diespin{0%{transform:rotate(0)}70%{transform:rotate(720deg)}100%{transform:rotate(1080deg)}}
 #version-tag{position:absolute;right:8px;bottom:8px;text-align:right;
   font-size:.68em;color:var(--dim);opacity:.6;pointer-events:none;}
-#recache-btn{display:block;margin:14px auto 0;
+#recache-btn,#desktop-mode-btn{margin:14px 0 0;
   background:#16281c;border:1px solid var(--gold-dim);color:var(--dim);
   font-size:.72em;padding:5px 14px;border-radius:14px;white-space:nowrap;}
-#recache-btn:hover{border-color:var(--gold);color:var(--ink);}
+#recache-btn:hover,#desktop-mode-btn:hover{border-color:var(--gold);color:var(--ink);}
 #recache-btn:disabled{opacity:.6;}
+#desktop-mode-btn{display:inline-flex;align-items:center;gap:5px;}
+#desktop-mode-check{font-size:1.15em;line-height:1;}
+/* "on" gets the same gold-accent treatment used elsewhere for an active toggle (e.g. .mode-tab.sel)
+   plus a filled checkmark glyph, swapped in by JS -- the empty/checked box alone was too easy to
+   miss at a glance, this needs to read as clearly on/off from across the room. */
+#desktop-mode-btn.on{border-color:var(--gold);background:#1c2c1e;color:var(--gold);}
 
 /* ---------- BOARD ---------- */
 #game-root{display:none;position:relative;height:100%;background:
@@ -599,7 +605,10 @@ button{font-family:inherit;cursor:pointer;}
       </div>
     </div>
     <div style="height:10px"></div>
-    <button id="recache-btn" type="button">↻ Force Refresh</button>
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap">
+      <button id="recache-btn" type="button">↻ Force Refresh</button>
+      <button id="desktop-mode-btn" type="button"><span id="desktop-mode-check">☐</span> Desktop Mode</button>
+    </div>
   </div>
   <div id="coin-flip-wrap">
     <p class="sub" style="margin:0">Rolling for first turn...</p>
@@ -698,25 +707,39 @@ button{font-family:inherit;cursor:pointer;}
 // entirely, so every dynamic overlay (modals, popups, floating damage numbers, beams, card
 // clones) appends here instead.
 const gameFrame=document.getElementById('game-frame');
-// #game-frame's own box IS the design resolution -- every cqw/cqh unit in the stylesheet is
-// anchored to whatever #game-frame's real width/height currently are (container-type:size), so
-// nothing about the internal layout itself needs to know or care what that ends up being. 393x852
-// (the phone this was originally built/tested against) is the reference aspect ratio (~0.461),
-// used by both sizing branches below so the frame's proportions are NEVER distorted -- content
-// throughout is sized via cqw (width-driven) clamps, so a box stretched to some other aspect ratio
-// would make cards wider without the matching vertical room to fit them, which is exactly what cut
-// the hand off under the log drawer the first time this was tried with an aspect-ignoring
-// fill-the-viewport formula for phones.
+// 393x852 (the phone this was originally built/tested against) is the reference design
+// resolution. Content throughout is sized via cqw (width-driven) clamps with real MINIMUM floors
+// (e.g. a card never renders under ~49px wide) -- deliberate, so nothing ever becomes illegibly
+// tiny. That has a real consequence for how the phone branch below has to work: on a genuinely
+// short effective viewport (mobile Safari's address bar + toolbar can eat 150-190px of vh), those
+// floors can stop shrinking well before the content actually fits, which forces a scroll -- NOT
+// acceptable for the primary phone experience. A real box resize (recomputing cqw/cqh against the
+// actual smaller frame) hits exactly that wall, because the floors don't participate in the
+// resize. CSS transform:scale() doesn't have this problem: it visually shrinks whatever got
+// rendered AFTER layout, floors included, so it always fits by construction, the same guarantee
+// this game has always relied on for mobile. So phone-shaped keeps that exact mechanism (a fixed
+// 393x852 layout, visually scaled, never distorting proportions); only the desktop branch (where
+// viewports are comfortably tall enough that this failure mode isn't a real risk) uses a genuine
+// real box resize, since that's what actually earns more cq room for things like fitting more
+// player boards on screen at once, not just a bigger picture of the same layout.
 const FRAME_W=393, FRAME_H=852, FRAME_ASPECT=FRAME_W/FRAME_H;
 // How far the frame is allowed to grow past the reference width on a screen that ISN'T phone-
 // shaped -- "slightly bigger than the original design, never sprawling across an ultra-wide
-// monitor." Fixed, not viewport-relative: real desktop viewports are essentially always wider
-// than this already, so this is the number doing the actual capping.
+// monitor." Fixed, not viewport-relative: real desktop viewports are essentially always wider than
+// this already, so this is the number doing the actual capping.
 const DESKTOP_MAX_W=520;
-// No longer driven by a CSS transform:scale() at all -- the frame's actual box size now IS its
-// real on-screen size, so real screen pixels always map 1:1 to the frame's internal coordinate
-// space. Kept (permanently 1) purely so toFrameRect() below, which divides by this, doesn't need
-// its own separate code path.
+let desktopMode=false;
+try{ desktopMode=localStorage.getItem('sy_desktopMode')==='1'; }catch{}
+function setDesktopMode(on){
+  desktopMode=on;
+  try{ localStorage.setItem('sy_desktopMode', on?'1':'0'); }catch{}
+  applyFrameScale();
+  if(typeof buildTableView==='function' && document.getElementById('game-root').style.display!=='none') buildTableView();
+}
+// Real screen pixels map 1:1 to the frame's internal coordinate space UNLESS the phone branch
+// below is active, in which case this is the live CSS scale factor -- kept in sync with whichever
+// branch actually ran so toFrameRect() (floating damage numbers, beams, destroy-clone animations)
+// never needs its own separate code path.
 let currentFrameScale=1;
 function applyFrameScale(){
   const vw=(window.visualViewport && window.visualViewport.width) || window.innerWidth;
@@ -724,19 +747,33 @@ function applyFrameScale(){
   const coarsePointer = !!(window.matchMedia && window.matchMedia('(pointer:coarse)').matches);
   // "Clearly rectangular like a phone": tall/narrow AND touch-primary -- a real phone in portrait,
   // not just any browser window someone happens to have resized tall and narrow. A phone rotated
-  // to landscape, or a squarish tablet, falls through to the desktop cap below instead, since the
-  // board's own layout is built portrait-first. Phone-shaped keeps today's exact sizing (capped at
-  // the 393x852 reference, same as always -- the UI was built and tuned around that) rather than
-  // stretching to fill the device; only non-phone-shaped screens get the modest extra stretch.
-  const isPhoneShaped = coarsePointer && vh>=vw*1.4;
-  const capW = isPhoneShaped ? FRAME_W : DESKTOP_MAX_W;
-  // Widest w that fits within the viewport, doesn't exceed the active cap, and (via vh*FRAME_ASPECT)
-  // never makes h taller than the viewport either -- h is then always exactly w/FRAME_ASPECT, so
-  // the reference proportions hold no matter which of the three limits ends up binding.
-  const w=Math.min(vw, capW, vh*FRAME_ASPECT);
-  const h=w/FRAME_ASPECT;
-  gameFrame.style.width=w+'px';
-  gameFrame.style.height=h+'px';
+  // to landscape, or a squarish tablet, falls through to the desktop branch below instead, since
+  // the board's own layout is built portrait-first. desktopMode forces the desktop branch
+  // regardless of actual device shape (see setDesktopMode()).
+  const isPhoneShaped = !desktopMode && coarsePointer && vh>=vw*1.4;
+  if(isPhoneShaped){
+    currentFrameScale=Math.min(vw/FRAME_W, vh/FRAME_H, 1);
+    gameFrame.style.width=FRAME_W+'px';
+    gameFrame.style.height=FRAME_H+'px';
+    gameFrame.style.transform=`translate(-50%,-50%) scale(${currentFrameScale})`;
+  } else {
+    currentFrameScale=1;
+    // Widest w that fits within the viewport, doesn't exceed DESKTOP_MAX_W, and (via
+    // vh*FRAME_ASPECT) never makes h taller than the viewport either -- h is then always exactly
+    // w/FRAME_ASPECT, so the reference proportions hold no matter which limit ends up binding.
+    // A wider cap here would NOT help 4P fit more boards without panning: on any realistic desktop
+    // window, vh*FRAME_ASPECT (the aspect-preserving height constraint) binds long before any width
+    // cap would, since reaching e.g. 900px wide at this aspect needs ~1950px of viewport height.
+    // What actually fixes 4P fitting is desktopMode forcing buildTableView()'s zoomedFourP
+    // single-page layout (see its own comment) -- that adapts to whatever width IS available via
+    // the same compact cqw-driven sizing the mobile zoom-out button already relies on, rather than
+    // needing the frame itself to be wider.
+    const w=Math.min(vw, DESKTOP_MAX_W, vh*FRAME_ASPECT);
+    const h=w/FRAME_ASPECT;
+    gameFrame.style.width=w+'px';
+    gameFrame.style.height=h+'px';
+    gameFrame.style.transform='translate(-50%,-50%)';
+  }
   gameFrame.classList.add('ready');
 }
 applyFrameScale();
@@ -1008,7 +1045,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v73';
+const GAME_VERSION='v74';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1027,6 +1064,19 @@ document.getElementById('recache-btn').addEventListener('click',async()=>{
   url.searchParams.set('_r',Date.now().toString());
   location.replace(url.toString());
 });
+(function initDesktopModeBtn(){
+  const btn=document.getElementById('desktop-mode-btn');
+  const check=document.getElementById('desktop-mode-check');
+  const paint=()=>{
+    btn.classList.toggle('on',desktopMode);
+    check.textContent=desktopMode?'☑':'☐';
+  };
+  paint();
+  btn.addEventListener('click',()=>{
+    setDesktopMode(!desktopMode);
+    paint();
+  });
+})();
 /* ============================= CARD DATABASE ============================= */
 const ATTRS=['LIGHT','DARK','EARTH','WATER','FIRE','WIND'];
 function slug(n){return n.toLowerCase().replace(/[^a-z0-9]+/g,'_').replace(/^_|_$/g,'');}
@@ -1429,7 +1479,10 @@ function buildTableView(){
   // 4P's zoom-out toggle (#zoom-toggle-btn) additionally collapses Table View down to a single
   // no-panning screen -- the same "everyone side by side" treatment 3P already gets by default
   // (3P never has a second page to pan to in the first place; 4P normally does, unless zoomed).
-  const zoomedFourP = G.numPlayers===4 && document.getElementById('board-wrap').classList.contains('zoomed-out');
+  // desktopMode forces this same single-page layout too, since a wide desktop frame has enough
+  // real cq room to show every board at once WITHOUT the zoom-out toggle's separate zoom:.72
+  // shrink -- that shrink stays tied only to #board-wrap's own .zoomed-out class, not to this flag.
+  const zoomedFourP = G.numPlayers===4 && (document.getElementById('board-wrap').classList.contains('zoomed-out') || desktopMode);
   // Only 4P (non-zoomed) ever populates page 1 -- every other case has a single page, so the lone
   // scene should fill the strip instead of reserving swipe-peek space for a page that won't exist.
   const singlePage = G.numPlayers<4 || zoomedFourP;
