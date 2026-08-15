@@ -898,6 +898,15 @@ function sendOnlineRelay(payload){
   if(!onlineSocket || onlineSocket.readyState!==WebSocket.OPEN) return;
   onlineSocket.send(JSON.stringify({type:'relay',payload}));
 }
+// Directed delivery to exactly one seat, instead of sendOnlineRelay's broadcast-to-everyone --
+// see the relay server's own 'unicast' handling. The receiving client still sees it as an
+// ordinary {type:'relay',...} message (receiveOnlineRelay doesn't need to know or care how it
+// got there), so this is only ever needed on the SENDING side for payloads that must not reach
+// every connected seat identically -- currently just the redacted per-guest state broadcast.
+function sendOnlineUnicast(toSeat,payload){
+  if(!onlineSocket || onlineSocket.readyState!==WebSocket.OPEN) return;
+  onlineSocket.send(JSON.stringify({type:'unicast',to:toSeat,payload}));
+}
 // Asks a SPECIFIC seat an interactive question, for decisions that belong to someone other than
 // whoever's action triggered them (e.g. the defender choosing a trap response to an attack the
 // ATTACKER declared) -- actingAsSeat's blanket ME-impersonation trick is wrong here because the
@@ -912,16 +921,53 @@ const pendingOnlineChoices={};
 function askSeatChoice(seat,title,body,options){
   if(seat===0){ showModal(title,body,options); return; }
   const requestId='c'+(++onlineChoiceSeq);
-  pendingOnlineChoices[requestId]=options;
+  // toSeat is stored alongside the options so a reply can be checked against the seat it was
+  // actually addressed to (see receiveOnlineRelay's 'choice-reply' handling) -- a reply claiming
+  // a requestId it wasn't sent for should never be trusted just because the id matches.
+  pendingOnlineChoices[requestId]={toSeat:seat,options};
   sendOnlineRelay({kind:'choice-request',toSeat:seat,requestId,title,body,labels:options.map(o=>o.label)});
 }
 function leaveOnlineRoom(){
   if(onlineSocket){ try{ onlineSocket.close(); }catch{} onlineSocket=null; }
   onlineMode=false; onlineIsHost=false; onlineSeatsTaken=[]; ME=0; MY_REAL_SEAT=0;
 }
+// Replaces a card's real identity with an opaque placeholder while preserving every other field
+// (uid, pos, zone, controller, tempAtk, equips, ...) exactly -- rendering code already never reads
+// baseId for a face-down card (it checks faceDown FIRST and shows a plain card-back), so this is
+// both safe (nothing downstream that reads those other fields breaks) and sufficient (the one
+// identity-revealing field, the only thing base(card)=DB[card.baseId] ever looks up, is gone).
+function redactCard(card){
+  return card ? Object.assign({},card,{baseId:'__hidden__',faceDown:true}) : card;
+}
+// Guests never run real game logic (see the host-authoritative comment a few lines below) -- they
+// render entirely off whatever the host last broadcast, so hiding information from them means
+// keeping it out of the broadcast payload itself, not just relying on the client's own rendering
+// to not display it (which was all the old unredacted broadcast did -- the real data was always
+// present in the WebSocket message for anyone inspecting traffic, regardless of what the UI chose
+// to show). Builds ONE recipient's view: every OTHER player's hand and the whole deck get every
+// card's identity redacted, except when Ceremonial Bell is face-up anywhere on the field, which by
+// its own text reveals every hand to every player -- redaction has to respect that condition, not
+// strip unconditionally. Face-down field cards (mon/st zones) are redacted for every seat except
+// the card's own controller, matching renderZoneRow's own faceDown=card.faceDown (a real,
+// viewer-independent property -- nobody but the controller ever needs the identity, including
+// while it's still face-down on their own field, which is why i===seat is excluded here).
+function buildRedactedStateFor(seat){
+  const showAllHands=isCeremonialBellActive();
+  return Object.assign({},G,{
+    deck:G.deck.map(redactCard),
+    players:G.players.map((p,i)=>Object.assign({},p,{
+      hand: (i===seat||showAllHands) ? p.hand : p.hand.map(redactCard),
+      mon: p.mon.map(c=>(c && c.faceDown && i!==seat) ? redactCard(c) : c),
+      st: p.st.map(c=>(c && c.faceDown && i!==seat) ? redactCard(c) : c),
+    })),
+  });
+}
 function broadcastOnlineStateIfHost(){
   if(!onlineMode || !onlineIsHost) return;
-  sendOnlineRelay({kind:'state',G});
+  onlineSeatsTaken.forEach(seat=>{
+    if(seat===0) return; // the host already has the real G locally, no need to send itself anything
+    sendOnlineUnicast(seat,{kind:'state',G:buildRedactedStateFor(seat)});
+  });
 }
 // A number of "leaf" mutation functions (finishSummon, placeSpell, placeTrapSet, ...) read the
 // global ME directly rather than taking an explicit pIdx -- they were written when ME could only
@@ -1064,14 +1110,25 @@ function receiveOnlineRelay(fromSeat,payload){
     if(G.gameOver && document.getElementById('gameover-bg').style.display!=='flex') showGameOverScreen();
   } else if(payload.kind==='action' && onlineIsHost){
     const fn=ONLINE_ACTION_FNS[payload.fnName];
-    if(fn) fn(...payload.args);
+    // Every ONLINE_ACTION_FNS entry takes the acting seat as its first argument -- fromSeat is
+    // stamped by the relay server itself from the real WebSocket connection (see server/src/
+    // index.js's broadcast(), which passes the authenticated sender's seat, never something a
+    // client can put in payload itself), so this is the one place that actually enforces "you can
+    // only act as your own seat." Without it, a client could send e.g.
+    // {fnName:'finishSummonFor', args:[otherSeat,...]} and the host would execute it as that
+    // other seat -- summoning, attacking, or activating cards on their behalf.
+    if(fn && payload.args && payload.args[0]===fromSeat) fn(...payload.args);
   } else if(payload.kind==='choice-request' && payload.toSeat===ME){
     showModal(payload.title,payload.body,payload.labels.map((label,i)=>({
       label, action:()=>sendOnlineRelay({kind:'choice-reply',requestId:payload.requestId,index:i}),
     })));
   } else if(payload.kind==='choice-reply' && onlineIsHost){
-    const opts=pendingOnlineChoices[payload.requestId];
+    const pending=pendingOnlineChoices[payload.requestId];
     delete pendingOnlineChoices[payload.requestId];
+    // Same principle as the action check above: a reply is only honored if it actually came from
+    // the seat the choice was addressed to (askSeatChoice's toSeat), not just whoever happened to
+    // guess/observe the requestId.
+    const opts=(pending && pending.toSeat===fromSeat) ? pending.options : null;
     if(opts && opts[payload.index]) opts[payload.index].action();
   }
   onOnlineRelayForRoomUI(fromSeat,payload);
@@ -1100,7 +1157,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v78';
+const GAME_VERSION='v79';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -1761,8 +1818,14 @@ function doStandbyPhase(){
   });
   livingSeats().forEach(s=>{
     const be=G.players[s].mon.find(m=>m && !m.faceDown && base(m).fx==='big_eye');
-    if(be && s===ME && G.deck.length){
-      showModal('Big Eye','Look at the top card of the Deck?',[
+    // isBot, not s===ME -- this runs unconditionally on every standby, with no actingAsSeat
+    // wrapper at all (ME here is just whatever it happened to be left at), so s===ME could only
+    // ever coincidentally match the host's own seat -- a Big Eye belonging to any other real
+    // connected human (seat 1-3 online) was never offered its choice at all. askSeatChoice(s,...)
+    // itself handles local (s===0) vs remote (relayed) correctly; bots still don't get prompted,
+    // same as before.
+    if(be && !G.players[s].isBot && G.deck.length){
+      askSeatChoice(s,'Big Eye','Look at the top card of the Deck?',[
         {label:'View', action:()=>showCardPopup(previewInstance(base(G.deck[G.deck.length-1])),false)},
         {label:'Skip', action:()=>{}},
       ]);
@@ -3199,13 +3262,20 @@ function chooseOrAuto(pIdx,options,cb){
 function chooseOpponent(pIdx,eligible,cb){
   if(!eligible.length){ cb(null); return; }
   if(eligible.length===1){ cb(eligible[0]); return; }
-  if(pIdx===ME){
-    askSeatChoice(pIdx,'Choose a Target','Target which opponent?',
-      eligible.map(s=>({label:`${pName(s)} (${G.health[s]} HP)`,action:()=>cb(s)})));
-  } else {
+  // Gate on isBot, not pIdx===ME -- ME is only a valid stand-in for "is pIdx a real human sitting
+  // at this browser" during the synchronous window of actingAsSeat's temporary impersonation. Any
+  // effect that reaches this point through an async gap (a previous choice's callback firing after
+  // a network round-trip) would already have ME reverted to the host's own seat by the time this
+  // runs, silently misrouting a real remote human into the bot heuristic below. askSeatChoice(pIdx,
+  // ...) itself already correctly handles "local human" (pIdx===0) vs "remote human" (any other
+  // seat, relayed over the network) -- isBot is the only question actually being asked here.
+  if(G.players[pIdx].isBot){
     let best=eligible[0];
     eligible.forEach(s=>{ if(G.health[s]<G.health[best]) best=s; }); // simple heuristic: pick on the weakest
     cb(best);
+  } else {
+    askSeatChoice(pIdx,'Choose a Target','Target which opponent?',
+      eligible.map(s=>({label:`${pName(s)} (${G.health[s]} HP)`,action:()=>cb(s)})));
   }
 }
 // Two-step "opponent"-worded effect: choose which living opponent (only those with >=1 legal
@@ -3219,12 +3289,16 @@ function chooseOpponentThenTarget(pIdx,candidateOpponents,getTargets,cb){
     // Unlike the opponent-choice step, the target-choice step always confirms via modal for a
     // human even with only one target on the field -- matching this codebase's existing
     // convention (every other targeted effect always shows its picker modal for a human).
-    if(pIdx===ME){
-      askSeatChoice(pIdx,'Choose a Target',`Target which of ${pName(opp)}'s cards?`,
-        targets.map(t=>({label:t.label,action:()=>cb(opp,t.idx)})));
-    } else {
+    // Same isBot-not-ME gate as chooseOpponent (see its own comment) -- this second step is
+    // exactly the async gap that bug depends on: it only runs once chooseOpponent's own callback
+    // fires, which for a remote human happens after a real network round-trip, by which point
+    // actingAsSeat has long since restored ME to the host's own seat.
+    if(G.players[pIdx].isBot){
       const pick=targets[Math.floor(Math.random()*targets.length)];
       cb(opp,pick.idx);
+    } else {
+      askSeatChoice(pIdx,'Choose a Target',`Target which of ${pName(opp)}'s cards?`,
+        targets.map(t=>({label:t.label,action:()=>cb(opp,t.idx)})));
     }
   });
 }
@@ -3244,11 +3318,14 @@ function resolveEachPlayerPassLeft(pIdx,card,idx,bonusAtk){
     const giver=givers[i];
     const opts=allOwnedMonsters(giver);
     const finish=(mi)=>{ picks[giver]=mi; askNext(i+1); };
-    if(giver===ME){
+    // isBot, not giver===ME -- see chooseOpponent's comment for why. This loop chains through
+    // multiple givers' async choices one after another; by the second or later giver, ME may
+    // already have reverted from an earlier giver's own actingAsSeat window closing.
+    if(G.players[giver].isBot){
+      finish(opts[Math.floor(Math.random()*opts.length)]);
+    } else {
       askSeatChoice(giver,base(card).n,`Choose a monster to give to ${pName(nextAliveSeat(giver))} (the player to your left):`,
         opts.map(mi=>({label:base(G.players[giver].mon[mi]).n,action:()=>finish(mi)})));
-    } else {
-      finish(opts[Math.floor(Math.random()*opts.length)]);
     }
   };
   const applyPasses=()=>{

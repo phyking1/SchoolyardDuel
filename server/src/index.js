@@ -49,6 +49,18 @@ export class DuelRoom extends DurableObject {
       // meaning lives entirely in the client.
       if (msg.type === "relay") {
         this.broadcast({ type: "relay", from: seat, payload: msg.payload }, seat);
+      } else if (msg.type === "unicast") {
+        // Directed delivery to exactly one seat -- everything else this relay does is a broadcast
+        // (send to everyone but the sender), which is fine for public game state and actions, but
+        // a per-recipient redacted state snapshot (each guest should see only their own hand, not
+        // everyone else's) genuinely needs to reach exactly one socket, not all of them. Still
+        // deliberately game-agnostic: the relay doesn't parse msg.payload at all, just needs a
+        // target seat number to route to.
+        const target = this.sockets.get(msg.to);
+        if (target) {
+          try { target.send(JSON.stringify({ type: "relay", from: seat, payload: msg.payload })); }
+          catch { /* socket already gone; its own close handler will clean up */ }
+        }
       }
     });
 
