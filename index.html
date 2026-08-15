@@ -1166,7 +1166,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v82';
+const GAME_VERSION='v83';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -2101,6 +2101,16 @@ function findEmptyZone(pIdx,type){
   const z=G.players[pIdx][type];
   for(let i=0;i<4;i++) if(!z[i]) return i;
   return -1;
+}
+// Equip Spells are cast from their controller's own S/T zone onto a monster THEY control -- so
+// when that monster's control changes to someone else (Change of Heart, Creature Swap/White
+// Elephant's Gift), any Equip Spell still attached via the OLD controller's equippedSide/
+// equippedIdx doesn't follow it. Real Yu-Gi-Oh sends orphaned Equip Cards to the Graveyard rather
+// than leaving them attached to a monster that's no longer on that field; mirrors the exact same
+// equippedSide/equippedIdx cleanup sendToGY/banish already do when a monster LEAVES the field.
+function orphanEquipsOnControlChange(m,oldSide,oldIdx){
+  G.players[oldSide].st.forEach((c,i)=>{ if(c && !c.faceDown && c.equippedSide===oldSide && c.equippedIdx===oldIdx){ G.gy.push(c); G.players[oldSide].st[i]=null; } });
+  m.equips=[];
 }
 
 /* ---- triggers ---- */
@@ -3124,7 +3134,7 @@ function triggerFlip(pIdx,card,idx,onDone){
     const opts=[];
     livingSeats().forEach(s=>{ G.players[s].mon.forEach((m,i)=>{ if(m) opts.push({side:s,i}); }); });
     if(opts.length){
-      const returnOne=(o)=>{ const m=G.players[o.side].mon[o.i]; G.players[o.side].mon[o.i]=null; G.players[o.side].hand.push(m); log(`Hane-Hane returns ${base(m).n} to hand.`,pIdx===ME?'me':'opp'); render(); done(); };
+      const returnOne=(o)=>{ const m=G.players[o.side].mon[o.i]; G.players[o.side].mon[o.i]=null; const ownerSeat=m.owner!=null?m.owner:o.side; G.players[ownerSeat].hand.push(m); log(`Hane-Hane returns ${base(m).n} to ${pName(ownerSeat)}'s hand.`,pIdx===ME?'me':'opp'); render(); done(); };
       // isBot, not pIdx===ME -- pIdx here is the DEFENDING seat whose flipped monster this is, which
       // performBattle may be resolving on behalf of a remote seat (see resolveAttackFor's
       // actingAsSeat, which has already closed and reverted ME by the time a flipped monster's own
@@ -3513,6 +3523,8 @@ function resolveEachPlayerPassLeft(pIdx,card,idx,bonusAtk){
     moves.forEach(mv=>{
       const z=findEmptyZone(mv.to,'mon');
       if(z<0){ G.gy.push(mv.card); log(`${pName(mv.to)} has no empty zone -- ${base(mv.card).n} is sent to the Graveyard instead.`,'sys'); return; }
+      mv.card.owner = mv.card.owner!=null ? mv.card.owner : mv.from; // see Change of Heart's own comment on this field
+      orphanEquipsOnControlChange(mv.card,mv.from,mv.idx);
       mv.card.controller=mv.to; mv.card.zone=z;
       if(bonusAtk){ mv.card.tempAtk=(mv.card.tempAtk||0)+bonusAtk; mv.card.tempDef=(mv.card.tempDef||0)+bonusAtk; }
       G.players[mv.to].mon[z]=mv.card;
@@ -3653,6 +3665,12 @@ function resolveSpellTrapEffect(pIdx,card,idx){
         const proceedSwap=()=>{
           const z=findEmptyZone(pIdx,'mon'); if(z<0){toast('No empty zone.');return;}
           G.players[opp].mon[i]=null;
+          // owner is distinct from controller and frozen the first time control ever changes (see
+          // Hane-Hane's returnOne, the only thing that currently reads it) -- if m.owner is already
+          // set here, this card has been stolen before and the ORIGINAL owner must be preserved,
+          // not overwritten with opp (its most recent controller, not necessarily its true owner).
+          m.owner = m.owner!=null ? m.owner : opp;
+          orphanEquipsOnControlChange(m,opp,i);
           m.controller=pIdx; m.zone=z; m.tempEndPhaseReturn={owner:opp,ownIdx:i}; G.players[pIdx].mon[z]=m;
           log(`${pName(pIdx)} takes control of ${base(m).n}.`,pIdx===ME?'me':'opp'); render();
         };
@@ -4066,7 +4084,15 @@ function botStep2(){
         resolveSpellTrapEffect(acting,card,z);
         setTimeout(tryOne,700);
       } else if(b.sub==='Equip'){
-        finishMain();
+        // Activate it (resolveSpellTrapEffect already handles every Equip-sub card correctly for a
+        // non-ME acting seat: the generic amulet_of_ambition/axe_of_fools/horn_of_unicorn case
+        // auto-equips to the bot's first owned monster, premature_burial auto-picks a GY target) and
+        // keep processing the rest of the hand -- previously this ended the bot's turn outright the
+        // moment it drew an Equip Spell, so no later spell/trap in hand was ever considered.
+        p.hand.splice(idx,1); card.faceDown=false; card.controller=acting; card.zone=z; card.summonedTurn=G.turnNum;
+        p.st[z]=card; log(`${pName(acting)} activates ${b.n}.`,acting===ME?'me':'opp'); SFX.activate(); markJustPlaced(card.uid); render();
+        resolveSpellTrapEffect(acting,card,z);
+        setTimeout(tryOne,700);
       } else {
         p.hand.splice(idx,1); card.faceDown=true; card.controller=acting; card.zone=z; card.summonedTurn=G.turnNum;
         p.st[z]=card; log(`${pName(acting)} Sets a card.`,acting===ME?'me':'opp'); SFX.place(); markJustPlaced(card.uid); render();
