@@ -570,6 +570,10 @@ button{font-family:inherit;cursor:pointer;}
 #detail-handle-text{overflow:hidden;white-space:nowrap;text-overflow:ellipsis;}
 #log-panel{max-height:26cqh;}
 #card-popup{top:52px;right:6px;}
+/* The popup always docks top-right by default, which is exactly where a 3-4 player board's
+   top-right opponent panel lives -- when the card that opened it is itself up there, dock the
+   popup to the top-left instead so it never covers the board it was opened from. */
+#card-popup.dock-left{left:6px;right:auto;}
 </style>
 </head>
 <body>
@@ -1177,7 +1181,7 @@ function beginOnlineDuel(){
   beginDuel();
 }
 
-const GAME_VERSION='v84';
+const GAME_VERSION='v85';
 document.getElementById('version-tag').textContent=GAME_VERSION;
 document.getElementById('recache-btn').addEventListener('click',async()=>{
   const btn=document.getElementById('recache-btn');
@@ -2231,9 +2235,9 @@ function renderCardEl(card,opts){
     }
   }
   const popupHidden = faceDown && !opts.mine;
-  d.addEventListener('mouseenter',()=>showCardPopup(card,popupHidden));
+  d.addEventListener('mouseenter',()=>showCardPopup(card,popupHidden,d));
   d.addEventListener('mouseleave',()=>hideCardPopup());
-  d.addEventListener('click',(e)=>{ e.stopPropagation(); if(opts.onClick) opts.onClick(); showCardPopup(card,popupHidden); });
+  d.addEventListener('click',(e)=>{ e.stopPropagation(); if(opts.onClick) opts.onClick(); showCardPopup(card,popupHidden,d); });
   return d;
 }
 
@@ -2284,11 +2288,23 @@ function fitCardDescription(desc){
     desc.style.fontSize=size+'px';
   }
 }
-function showCardPopup(card,faceDown){
+function showCardPopup(card,faceDown,sourceEl){
   const inner=document.getElementById('card-popup-inner');
   inner.innerHTML='';
   inner.appendChild(buildZoomCard(card,faceDown));
-  document.getElementById('card-popup').classList.add('show');
+  const popup=document.getElementById('card-popup');
+  popup.classList.add('show');
+  // Default docks top-right, which is exactly where a 3-4 player board's top-right opponent panel
+  // sits -- if the card that triggered this popup is itself up there, dock left instead so the
+  // popup never covers the very board it was opened from.
+  let dockLeft=false;
+  if(sourceEl){
+    const frame=document.getElementById('game-frame').getBoundingClientRect();
+    const r=sourceEl.getBoundingClientRect();
+    const cx=r.left+r.width/2-frame.left, cy=r.top+r.height/2-frame.top;
+    dockLeft = cx>frame.width/2 && cy<frame.height/2;
+  }
+  popup.classList.toggle('dock-left',dockLeft);
   const desc=inner.querySelector('.c-desc');
   if(desc) fitCardDescription(desc);
 }
